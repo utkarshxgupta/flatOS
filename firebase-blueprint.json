@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the FlatOS app.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The user's unique ID." },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string", "format": "uri" },
+        "karma": { "type": "number", "description": "The user's karma points." },
+        "flatId": { "type": "string", "description": "The ID of the flat the user belongs to." },
+        "isDummy": { "type": "boolean", "description": "Whether this is an imported dummy persona." }
+      },
+      "required": ["uid", "displayName", "email", "karma"]
+    },
+    "Flat": {
+      "title": "Flat",
+      "description": "A shared living space.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "currency": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "adminId": { "type": "string" },
+        "members": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "currency", "creatorId", "adminId", "members"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "A shared expense within a flat.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "paidBy": { "type": "string" },
+        "splitBetween": { "type": "array", "items": { "type": "string" } },
+        "receiptUrl": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "settled": { "type": "boolean" }
+      },
+      "required": ["flatId", "title", "amount", "paidBy", "splitBetween", "date", "settled"]
+    },
+    "PantryItem": {
+      "title": "PantryItem",
+      "description": "An item in the flat's digital pantry.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "string" },
+        "unit": { "type": "string" },
+        "category": { "type": "string" },
+        "healthTag": { "type": "string" },
+        "addedBy": { "type": "string" },
+        "dateAdded": { "type": "string", "format": "date-time" }
+      },
+      "required": ["flatId", "name", "quantity", "unit", "category", "addedBy", "dateAdded"]
+    },
+    "Chore": {
+      "title": "Chore",
+      "description": "A task assigned to a flatmate.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "title": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "completed": { "type": "boolean" },
+        "karmaReward": { "type": "number" }
+      },
+      "required": ["flatId", "title", "assignedTo", "dueDate", "completed", "karmaReward"]
+    },
+    "KarmaLog": {
+      "title": "KarmaLog",
+      "description": "A log of karma points awarded or deducted.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "userId": { "type": "string" },
+        "action": { "type": "string" },
+        "points": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["flatId", "userId", "action", "points", "date"]
+    },
+    "ConsumptionLog": {
+      "title": "ConsumptionLog",
+      "description": "A log of items consumed from the pantry.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "userId": { "type": "string" },
+        "itemName": { "type": "string" },
+        "quantity": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["flatId", "userId", "itemName", "date"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles."
+    },
+    "/flats/{flatId}": {
+      "schema": { "$ref": "#/entities/Flat" },
+      "description": "Flats and their configurations."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Expenses logged in flats."
+    },
+    "/pantryItems/{itemId}": {
+      "schema": { "$ref": "#/entities/PantryItem" },
+      "description": "Items in the digital pantry."
+    },
+    "/chores/{choreId}": {
+      "schema": { "$ref": "#/entities/Chore" },
+      "description": "Chores assigned to flatmates."
+    },
+    "/karmaLogs/{logId}": {
+      "schema": { "$ref": "#/entities/KarmaLog" },
+      "description": "Logs of karma changes."
+    },
+    "/consumptionLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ConsumptionLog" },
+      "description": "Logs of consumed pantry items."
+    }
+  }
+}

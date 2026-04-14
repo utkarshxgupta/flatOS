@@ -1,0 +1,211 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() > 0 &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.karma is number &&
+             (!('flatId' in data) || data.flatId == null || (data.flatId is string && data.flatId.size() > 0 && data.flatId.size() < 100)) &&
+             (!('isDummy' in data) || data.isDummy is bool);
+    }
+
+    function isValidFlat(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.currency is string && data.currency.size() > 0 && data.currency.size() < 10 &&
+             data.creatorId is string && data.creatorId.size() > 0 &&
+             data.adminId is string && data.adminId.size() > 0 &&
+             data.members is list && data.members.size() > 0 && data.members.size() < 50;
+    }
+
+    function isValidExpense(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.amount is number && data.amount >= 0 &&
+             data.paidBy is string && data.paidBy.size() > 0 &&
+             data.splitBetween is list && data.splitBetween.size() > 0 && data.splitBetween.size() < 50 &&
+             data.date is string &&
+             data.settled is bool &&
+             (!('receiptUrl' in data) || data.receiptUrl == null || (data.receiptUrl is string && data.receiptUrl.size() < 1000));
+    }
+
+    function isValidPantryItem(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (data.quantity is number || (data.quantity is string && data.quantity.size() < 50)) &&
+             data.unit is string && data.unit.size() > 0 && data.unit.size() < 50 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 50 &&
+             data.addedBy is string && data.addedBy.size() > 0 &&
+             data.dateAdded is string &&
+             (!('healthTag' in data) || data.healthTag == null || (data.healthTag is string && data.healthTag.size() < 100));
+    }
+
+    function isValidChore(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.assignedTo is string && data.assignedTo.size() > 0 &&
+             data.dueDate is string &&
+             data.completed is bool &&
+             data.karmaReward is number && data.karmaReward >= 0;
+    }
+
+    function isValidKarmaLog(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.action is string && data.action.size() > 0 && data.action.size() < 200 &&
+             data.points is number &&
+             data.date is string;
+    }
+
+    // Check if user is a member of the flat
+    function isFlatMember(flatId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/flats/$(flatId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/flats/$(flatId)).data.members;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated(); // Allow reading profiles for flatmates
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || request.resource.data.isDummy == true);
+      allow update: if isAuthenticated() && isValidUser(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.isDummy == true;
+    }
+
+    match /flats/{flatId} {
+      allow read: if isAuthenticated() && (request.auth.uid in resource.data.members);
+      allow create: if isAuthenticated() && isValidFlat(request.resource.data) && request.auth.uid == request.resource.data.creatorId;
+      allow update: if isAuthenticated() && isValidFlat(request.resource.data) && (request.auth.uid in resource.data.members);
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if isFlatMember(resource.data.flatId);
+      allow create: if isFlatMember(request.resource.data.flatId) && isValidExpense(request.resource.data);
+      allow update: if isFlatMember(resource.data.flatId) && isValidExpense(request.resource.data);
+      allow delete: if isFlatMember(resource.data.flatId) && request.auth.uid == resource.data.paidBy;
+    }
+
+    match /pantryItems/{itemId} {
+      allow read: if isFlatMember(resource.data.flatId);
+      allow create: if isFlatMember(request.resource.data.flatId) && isValidPantryItem(request.resource.data);
+      allow update: if isFlatMember(resource.data.flatId) && isValidPantryItem(request.resource.data);
+      allow delete: if isFlatMember(resource.data.flatId);
+    }
+
+    match /chores/{choreId} {
+      allow read: if isFlatMember(resource.data.flatId);
+      allow create: if isFlatMember(request.resource.data.flatId) && isValidChore(request.resource.data);
+      allow update: if isFlatMember(resource.data.flatId) && isValidChore(request.resource.data);
+      allow delete: if isFlatMember(resource.data.flatId);
+    }
+
+    match /karmaLogs/{logId} {
+      allow read: if isFlatMember(resource.data.flatId);
+      allow create: if isFlatMember(request.resource.data.flatId) && isValidKarmaLog(request.resource.data);
+      allow update: if isFlatMember(resource.data.flatId); // Allow update for claiming dummy
+      allow delete: if false; // Karma logs are immutable
+    }
+    function isValidNotice(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.authorId is string && data.authorId.size() > 0 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
+             data.type in ['announcement', 'poll'] &&
+             data.createdAt is string &&
+             (!('options' in data) || data.options == null || data.options is list) &&
+             (!('votes' in data) || data.votes == null || data.votes is map);
+    }
+
+    function isValidVaultItem(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             data.value is string && data.value.size() > 0 && data.value.size() < 1000 &&
+             data.type in ['password', 'text', 'link'] &&
+             data.addedBy is string && data.addedBy.size() > 0 &&
+             data.createdAt is string;
+    }
+
+    function isValidRecurringExpense(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.amount is number && data.amount >= 0 &&
+             data.paidBy is string && data.paidBy.size() > 0 &&
+             data.splitBetween is list && data.splitBetween.size() > 0 && data.splitBetween.size() < 50 &&
+             data.frequency == 'monthly' &&
+             data.nextDueDate is string;
+    }
+
+    match /notices/{noticeId} {
+      allow read: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow create: if isAuthenticated() && isValidNotice(request.resource.data) && isFlatMember(request.resource.data.flatId);
+      allow update: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow delete: if isAuthenticated() && isFlatMember(resource.data.flatId) && request.auth.uid == resource.data.authorId;
+    }
+
+    match /vault/{itemId} {
+      allow read: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow create: if isAuthenticated() && isValidVaultItem(request.resource.data) && isFlatMember(request.resource.data.flatId);
+      allow update: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow delete: if isAuthenticated() && isFlatMember(resource.data.flatId) && request.auth.uid == resource.data.addedBy;
+    }
+
+    match /recurringExpenses/{expenseId} {
+      allow read: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow create: if isAuthenticated() && isValidRecurringExpense(request.resource.data) && isFlatMember(request.resource.data.flatId);
+      allow update: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow delete: if isAuthenticated() && isFlatMember(resource.data.flatId);
+    }
+    function isValidConsumptionLog(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.itemName is string && data.itemName.size() > 0 && data.itemName.size() < 200 &&
+             data.date is string &&
+             (!('quantity' in data) || data.quantity == null || (data.quantity is string && data.quantity.size() < 100));
+    }
+
+    match /consumptionLogs/{logId} {
+      allow read: if isFlatMember(resource.data.flatId);
+      allow create: if isFlatMember(request.resource.data.flatId) && isValidConsumptionLog(request.resource.data);
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}
