@@ -9,6 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
 
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+
 export default function OnboardingPage() {
   const { user, refreshProfile } = useAppContext();
   const [isCreating, setIsCreating] = useState(true);
@@ -220,22 +222,13 @@ export default function OnboardingPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md rounded-3xl shadow-xl border-0 overflow-hidden">
-        <div className="flex border-b">
-          <button 
-            className={`flex-1 py-4 text-sm font-medium transition-colors ${isCreating ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
-            onClick={() => setIsCreating(true)}
-          >
-            Create a Flat
-          </button>
-          <button 
-            className={`flex-1 py-4 text-sm font-medium transition-colors ${!isCreating ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
-            onClick={() => setIsCreating(false)}
-          >
-            Join a Flat
-          </button>
-        </div>
-        
-        <CardHeader>
+        <CardHeader className="pb-2">
+          <Tabs value={isCreating ? 'create' : 'join'} onValueChange={(v) => setIsCreating(v === 'create')} className="w-full mb-4">
+            <TabsList className="grid w-full grid-cols-2 bg-muted rounded-full p-1">
+              <TabsTrigger value="create" className="rounded-full text-xs">Create a Flat</TabsTrigger>
+              <TabsTrigger value="join" className="rounded-full text-xs">Join a Flat</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <CardTitle className="text-2xl">{isCreating ? 'Set up your Flat' : 'Join your Flatmates'}</CardTitle>
           <CardDescription>
             {isCreating ? 'Create a new digital space for your household.' : 'Enter the invite code from your flatmate.'}

@@ -100,6 +100,46 @@
         "date": { "type": "string", "format": "date-time" }
       },
       "required": ["flatId", "userId", "itemName", "date"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "A post or poll on the notice board.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["announcement", "poll"] },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "votes": { "type": "object" },
+        "likes": { "type": "array", "items": { "type": "string" } },
+        "comments": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "authorId": { "type": "string" },
+              "content": { "type": "string" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            }
+          } 
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["flatId", "authorId", "content", "type", "createdAt"]
+    },
+    "ShoppingListItem": {
+      "title": "ShoppingListItem",
+      "description": "An item to buy for the flat.",
+      "type": "object",
+      "properties": {
+        "flatId": { "type": "string" },
+        "name": { "type": "string" },
+        "addedBy": { "type": "string" },
+        "dateAdded": { "type": "string", "format": "date-time" }
+      },
+      "required": ["flatId", "name", "addedBy", "dateAdded"]
     }
   },
   "firestore": {
@@ -130,6 +170,14 @@
     "/consumptionLogs/{logId}": {
       "schema": { "$ref": "#/entities/ConsumptionLog" },
       "description": "Logs of consumed pantry items."
+    },
+    "/notices/{noticeId}": {
+      "schema": { "$ref": "#/entities/Notice" },
+      "description": "Posts and polls on the notice board."
+    },
+    "/shoppingList/{itemId}": {
+      "schema": { "$ref": "#/entities/ShoppingListItem" },
+      "description": "Items on the shared shopping list."
     }
   }
 }

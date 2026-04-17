@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { MessageSquare, BarChart2, Trash2, Send } from 'lucide-react';
+import { MessageSquare, BarChart2, Trash2, Send, Heart } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -21,6 +21,8 @@ export default function NoticeBoardPage() {
   const [type, setType] = useState<'announcement' | 'poll'>('announcement');
   const [options, setOptions] = useState(['', '']);
   const [loading, setLoading] = useState(false);
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!flatId) return;
@@ -86,6 +88,45 @@ export default function NoticeBoardPage() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `notices/${noticeId}`);
       toast.error('Failed to vote');
+    }
+  };
+
+  const toggleLike = async (noticeId: string) => {
+    if (!user) return;
+    const notice = notices.find(n => n.id === noticeId);
+    if (!notice) return;
+
+    try {
+      const likes = notice.likes || [];
+      const newLikes = likes.includes(user.uid) 
+        ? likes.filter((id: string) => id !== user.uid)
+        : [...likes, user.uid];
+      
+      await updateDoc(doc(db, 'notices', noticeId), { likes: newLikes });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `notices/${noticeId}`);
+      toast.error('Failed to like');
+    }
+  };
+
+  const addComment = async (noticeId: string, commentContent: string) => {
+    if (!user || !commentContent.trim()) return;
+    const notice = notices.find(n => n.id === noticeId);
+    if (!notice) return;
+
+    try {
+      const newComment = {
+        id: Math.random().toString(36).substring(2, 9),
+        authorId: user.uid,
+        content: commentContent.trim(),
+        createdAt: new Date().toISOString()
+      };
+      const newComments = [...(notice.comments || []), newComment];
+      
+      await updateDoc(doc(db, 'notices', noticeId), { comments: newComments });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `notices/${noticeId}`);
+      toast.error('Failed to add comment');
     }
   };
 
@@ -161,6 +202,83 @@ export default function NoticeBoardPage() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+
+                  <div className="mt-4 pt-4 border-t flex items-center gap-4">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className={`h-8 px-2 ${notice.likes?.includes(user?.uid || '') ? 'text-red-500 hover:text-red-600' : 'text-muted-foreground hover:text-red-500'}`}
+                      onClick={() => toggleLike(notice.id)}
+                    >
+                      <Heart size={16} className={`mr-1.5 ${notice.likes?.includes(user?.uid || '') ? 'fill-current' : ''}`} />
+                      {notice.likes?.length || 0}
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-8 px-2 text-muted-foreground hover:text-primary"
+                      onClick={() => setExpandedComments(prev => ({ ...prev, [notice.id]: !prev[notice.id] }))}
+                    >
+                      <MessageSquare size={16} className="mr-1.5" />
+                      {notice.comments?.length || 0}
+                    </Button>
+                  </div>
+
+                  {expandedComments[notice.id] && (
+                    <div className="mt-4 space-y-4">
+                      {notice.comments?.map((comment: any) => {
+                        const commentAuthor = flatmates.find(m => m.id === comment.authorId);
+                        return (
+                          <div key={comment.id} className="flex gap-3">
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={commentAuthor?.photoURL} />
+                              <AvatarFallback>{commentAuthor?.displayName?.charAt(0)}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 bg-muted/50 p-3 rounded-2xl rounded-tl-none">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-medium text-sm">{commentAuthor?.displayName}</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
+                                </span>
+                              </div>
+                              <p className="text-sm text-foreground">{comment.content}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      <div className="flex gap-2 items-center mt-2">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={user?.photoURL || ''} />
+                          <AvatarFallback>{user?.displayName?.charAt(0) || 'U'}</AvatarFallback>
+                        </Avatar>
+                        <Input 
+                          placeholder="Write a comment..." 
+                          className="flex-1 h-9 rounded-full bg-muted/50 border-transparent focus-visible:ring-1"
+                          value={commentInputs[notice.id] || ''}
+                          onChange={(e) => setCommentInputs(prev => ({ ...prev, [notice.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              addComment(notice.id, commentInputs[notice.id] || '');
+                              setCommentInputs(prev => ({ ...prev, [notice.id]: '' }));
+                            }
+                          }}
+                        />
+                        <Button 
+                          size="icon" 
+                          className="h-9 w-9 rounded-full shrink-0"
+                          disabled={!commentInputs[notice.id]?.trim()}
+                          onClick={() => {
+                            addComment(notice.id, commentInputs[notice.id] || '');
+                            setCommentInputs(prev => ({ ...prev, [notice.id]: '' }));
+                          }}
+                        >
+                          <Send size={14} />
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </CardContent>

@@ -130,10 +130,85 @@ export default function ExpensesPage() {
     });
   };
 
+  const parseQuantity = (q: string) => {
+    const match = q.toString().toLowerCase().match(/([\d.]+)\s*([a-zA-Z]+)?(?:\s*(?:x|\*)\s*([\d.]+))?/);
+    if (match) {
+      const num1 = parseFloat(match[1]);
+      const unit = match[2] || '';
+      const num2 = match[3] ? parseFloat(match[3]) : 1;
+      return { val: num1 * num2, unit: unit.trim() };
+    }
+    return { val: 0, unit: q };
+  };
+
+  // Shopping list matching state
+  const [shoppingListMatches, setShoppingListMatches] = useState<{ id: string, name: string, matchedParsedItem: string }[]>([]);
+  const [showShoppingListDialog, setShowShoppingListDialog] = useState(false);
+  const [selectedMatchesToCheckout, setSelectedMatchesToCheckout] = useState<string[]>([]);
+  const [isFinalizingSubmit, setIsFinalizingSubmit] = useState(false);
+
+  const addQuantities = (q1: string, q2: string) => {
+    const p1 = parseQuantity(q1);
+    const p2 = parseQuantity(q2);
+    if (p1.val > 0 && p2.val > 0 && p1.unit === p2.unit) {
+      return `${p1.val + p2.val} ${p1.unit}`.trim();
+    }
+    return `${q1} + ${q2}`;
+  };
+
   const submitParsedReceipt = async () => {
     if (!user || !flatId) return;
     setLoading(true);
+    
     try {
+      const shoppingSnap = await getDocs(query(collection(db, 'shoppingList'), where('flatId', '==', flatId)));
+      const shoppingListItems = shoppingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+
+      const matches: { id: string, name: string, matchedParsedItem: string }[] = [];
+      const parsedItemNames = parsedItems.filter(i => i.addToPantry).map(i => i.name.toLowerCase().replace(/[^a-z0-9]/g, ''));
+      
+      const parsedItemDocs = parsedItems.filter(i => i.addToPantry);
+
+      for (const sItem of shoppingListItems) {
+        const sName = sItem.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        // Simple fuzzy match check
+        const matchDoc = parsedItemDocs.find(p => {
+          const pName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return pName.includes(sName) || sName.includes(pName);
+        });
+        
+        if (matchDoc) {
+          matches.push({ id: sItem.id, name: sItem.name, matchedParsedItem: matchDoc.name });
+        }
+      }
+
+      setLoading(false);
+      if (matches.length > 0) {
+        setShoppingListMatches(matches);
+        setSelectedMatchesToCheckout(matches.map(m => m.id));
+        setShowShoppingListDialog(true);
+      } else {
+        await finalSubmitParsedReceipt();
+      }
+    } catch (e) {
+      setLoading(false);
+      toast.error('Error checking shopping list match');
+      await finalSubmitParsedReceipt();
+    }
+  };
+
+  const finalSubmitParsedReceipt = async () => {
+    if (!user || !flatId) return;
+    setIsFinalizingSubmit(true);
+    try {
+      // Check off selected shopping list items
+      if (selectedMatchesToCheckout.length > 0) {
+        for (const itemId of selectedMatchesToCheckout) {
+          await deleteDoc(doc(db, 'shoppingList', itemId));
+        }
+        toast.success(`Removed ${selectedMatchesToCheckout.length} items from Shopping List`);
+      }
+
       const groupId = `receipt_${Date.now()}`;
       const groupTitle = receiptMerchant ? `${receiptMerchant} Order` : 'Receipt Upload';
       
@@ -165,24 +240,34 @@ export default function ExpensesPage() {
             return normalizedExisting.includes(normalizedNewName) || normalizedNewName.includes(normalizedExisting);
           });
 
+          const itemQuantity = item.quantity || '1';
+          const newHistoryEntry = { quantity: itemQuantity, date: new Date().toISOString() };
+
           if (matchedItem) {
             // Update existing item
-            const newQuantity = `${matchedItem.quantity} + ${item.quantity || '1'}`;
+            const newQuantity = addQuantities(matchedItem.quantity, itemQuantity);
+            const newHistory = matchedItem.history ? [...matchedItem.history, newHistoryEntry] : [
+              { quantity: matchedItem.quantity, date: matchedItem.dateAdded },
+              newHistoryEntry
+            ];
+            
             await updateDoc(doc(db, 'pantryItems', matchedItem.id), {
               quantity: newQuantity,
-              dateAdded: new Date().toISOString() // refresh date
+              dateAdded: new Date().toISOString(), // refresh date
+              history: newHistory
             });
           } else {
             // Add new item
             await addDoc(collection(db, 'pantryItems'), {
               flatId,
               name: item.name,
-              quantity: item.quantity || '1',
+              quantity: itemQuantity,
               unit: 'unit',
               category: item.category || 'Groceries',
               healthTag: item.healthTag || '',
               addedBy: user.uid,
-              dateAdded: new Date().toISOString()
+              dateAdded: new Date().toISOString(),
+              history: [newHistoryEntry]
             });
           }
         }
@@ -207,11 +292,14 @@ export default function ExpensesPage() {
       setParsedItems([]);
       setReceiptTotal(0);
       setReceiptMerchant('');
+      setShowShoppingListDialog(false);
+      setShoppingListMatches([]);
+      setSelectedMatchesToCheckout([]);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'expenses');
       toast.error('Failed to save receipt items');
     } finally {
-      setLoading(false);
+      setIsFinalizingSubmit(false);
     }
   };
 
@@ -439,7 +527,7 @@ export default function ExpensesPage() {
   flatmates.forEach(m => balances[m.id] = 0);
 
   expenses.forEach(exp => {
-    if (exp.settled) return;
+    if (exp.settled && !exp.isPayment) return;
     const splitAmount = exp.amount / exp.splitBetween.length;
     
     // Person who paid gets positive balance
@@ -492,6 +580,39 @@ export default function ExpensesPage() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [editAmount, setEditAmount] = useState('');
 
+  const [settleDialogOpen, setSettleDialogOpen] = useState(false);
+  const [settleTarget, setSettleTarget] = useState<string>('');
+  const [settleAmount, setSettleAmount] = useState('');
+
+  const handleCustomSettle = async () => {
+    if (!user || !flatId || !settleTarget || !settleAmount) return;
+    const amountNum = parseFloat(settleAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'expenses'), {
+        flatId,
+        title: 'Settlement Payment',
+        amount: amountNum,
+        paidBy: user.uid,
+        splitBetween: [settleTarget],
+        date: new Date().toISOString(),
+        settled: true, // It's a payment, so it doesn't need settling itself
+        isPayment: true
+      });
+      toast.success('Payment recorded successfully');
+      setSettleDialogOpen(false);
+      setSettleAmount('');
+      setSettleTarget('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'expenses');
+      toast.error('Failed to record payment');
+    }
+  };
+
   const saveEditedExpense = async () => {
     if (!editingExpense) return;
     try {
@@ -539,9 +660,25 @@ export default function ExpensesPage() {
                         </Avatar>
                         <span className="text-sm font-medium">{mate.displayName}</span>
                       </div>
-                      <span className={`font-mono font-medium ${bal > 0 ? 'text-green-600' : bal < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                        {bal > 0 ? '+' : ''}{bal.toFixed(2)}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className={`font-mono font-medium ${bal > 0 ? 'text-green-600' : bal < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                          {bal > 0 ? '+' : ''}{bal.toFixed(2)}
+                        </span>
+                        {mate.id !== user?.uid && bal > 0 && balances[user?.uid || ''] < -0.01 && (
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="h-7 text-xs rounded-full"
+                            onClick={() => {
+                              setSettleTarget(mate.id);
+                              setSettleAmount(Math.min(bal, Math.abs(balances[user?.uid || ''])).toFixed(2));
+                              setSettleDialogOpen(true);
+                            }}
+                          >
+                            Settle
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -596,11 +733,6 @@ export default function ExpensesPage() {
                                 </div>
                                 <div className="text-right flex flex-col items-end gap-1">
                                   <span className="font-mono">{exp.amount.toFixed(2)}</span>
-                                  {!exp.settled && exp.paidBy !== user?.uid && exp.splitBetween.includes(user?.uid) && (
-                                    <Button size="sm" variant="outline" className="h-6 text-[10px] rounded-full" onClick={() => settleExpense(exp.id)}>
-                                      Settle
-                                    </Button>
-                                  )}
                                   {exp.settled && (
                                     <div className="flex items-center gap-1">
                                       <Badge variant="secondary" className="text-[8px] px-1 py-0">Settled</Badge>
@@ -643,17 +775,17 @@ export default function ExpensesPage() {
                     </div>
                     <div className="text-right flex flex-col items-end gap-2">
                       <span className="font-mono font-medium">{exp.amount.toFixed(2)}</span>
-                      {!exp.settled && exp.paidBy !== user?.uid && exp.splitBetween.includes(user?.uid) && (
-                        <Button size="sm" variant="outline" className="h-7 text-xs rounded-full" onClick={() => settleExpense(exp.id)}>
-                          Settle
-                        </Button>
-                      )}
-                      {exp.settled && (
+                      {exp.settled && !exp.isPayment && (
                         <div className="flex items-center gap-2">
                           <Badge variant="secondary" className="text-[10px]">Settled</Badge>
                           <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] rounded-full hover:bg-muted" onClick={() => undoSettleExpense(exp.id)}>
                             Undo
                           </Button>
+                        </div>
+                      )}
+                      {exp.isPayment && (
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="text-[10px] bg-green-500/10 text-green-600">Payment</Badge>
                         </div>
                       )}
                     </div>
@@ -1007,7 +1139,80 @@ export default function ExpensesPage() {
             </CardContent>
           </Card>
         </TabsContent>
+        <Dialog open={settleDialogOpen} onOpenChange={setSettleDialogOpen}>
+          <DialogContent className="sm:max-w-md rounded-3xl">
+            <DialogHeader>
+              <DialogTitle>Settle Balance</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Amount to Pay</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                  <Input 
+                    type="number" 
+                    className="pl-7" 
+                    value={settleAmount} 
+                    onChange={(e) => setSettleAmount(e.target.value)} 
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <Button className="w-full rounded-full" onClick={handleCustomSettle}>
+                Record Payment
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </Tabs>
+
+      <Dialog open={showShoppingListDialog} onOpenChange={setShowShoppingListDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Shopping List Match</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              We found some items from your receipt that look like they cross off items from your shared "To Buy" list. Want to check them off?
+            </p>
+            <div className="space-y-2 border rounded-2xl bg-muted/30 p-2">
+              {shoppingListMatches.map(match => {
+                const isSelected = selectedMatchesToCheckout.includes(match.id);
+                return (
+                  <div key={match.id} className="flex items-center justify-between p-2 rounded-xl bg-card border">
+                    <div>
+                      <p className="text-sm font-medium">{match.name}</p>
+                      <p className="text-xs text-muted-foreground">Matched: {match.matchedParsedItem}</p>
+                    </div>
+                    <div 
+                      className={`h-5 w-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-colors ${
+                        isSelected ? 'bg-primary border-primary' : 'border-muted-foreground hover:border-primary'
+                      }`}
+                      onClick={() => {
+                        setSelectedMatchesToCheckout(prev => 
+                          prev.includes(match.id) ? prev.filter(id => id !== match.id) : [...prev, match.id]
+                        );
+                      }}
+                    >
+                      {isSelected && <CheckCircle2 size={12} className="text-primary-foreground" />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <Button className="w-full rounded-full mt-2" onClick={finalSubmitParsedReceipt} disabled={isFinalizingSubmit}>
+              {isFinalizingSubmit ? 'Finalizing...' : 'Confirm & Submit Receipt'}
+            </Button>
+            <Button variant="ghost" className="w-full rounded-full" onClick={() => {
+              setSelectedMatchesToCheckout([]);
+              setShowShoppingListDialog(false);
+              finalSubmitParsedReceipt();
+            }} disabled={isFinalizingSubmit}>
+              Skip
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

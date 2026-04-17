@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, NavLink } from 'react-router-dom';
-import { Home, Receipt, Package, CheckSquare, LogOut, Moon, Sun, Download, UserCircle, Settings, MessageSquare, Shield } from 'lucide-react';
+import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Home, Receipt, Package, CheckSquare, LogOut, Moon, Sun, Download, UserCircle, Settings, MessageSquare, Shield, Menu } from 'lucide-react';
 import { logOut, db, handleFirestoreError, OperationType } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAppContext } from '../AppContext';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '../components/theme-provider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -14,7 +15,8 @@ import { toast } from 'sonner';
 
 export default function DashboardLayout() {
   const { theme, setTheme } = useTheme();
-  const { userProfile, refreshProfile, user } = useAppContext();
+  const { userProfile, refreshProfile, user, flatId } = useAppContext();
+  const location = useLocation();
   const [showPWA, setShowPWA] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   
@@ -22,6 +24,80 @@ export default function DashboardLayout() {
   const [editName, setEditName] = useState(userProfile?.displayName || '');
   const [editAvatar, setEditAvatar] = useState(userProfile?.photoURL || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Notification State
+  const [latestBoardTime, setLatestBoardTime] = useState(0);
+  const [latestExpenseTime, setLatestExpenseTime] = useState(0);
+  const [pendingChoresCount, setPendingChoresCount] = useState(0);
+
+  const [lastSeenBoard, setLastSeenBoard] = useState(Number(localStorage.getItem('lastSeenBoard')) || 0);
+  const [lastSeenExpenses, setLastSeenExpenses] = useState(Number(localStorage.getItem('lastSeenExpenses')) || 0);
+  const [lastSeenChoresCount, setLastSeenChoresCount] = useState(Number(localStorage.getItem('lastSeenChoresCount')) || 0);
+
+  useEffect(() => {
+    if (location.pathname === '/dashboard/board') {
+      const now = Date.now();
+      localStorage.setItem('lastSeenBoard', now.toString());
+      setLastSeenBoard(now);
+    } else if (location.pathname === '/dashboard/expenses') {
+      const now = Date.now();
+      localStorage.setItem('lastSeenExpenses', now.toString());
+      setLastSeenExpenses(now);
+    } else if (location.pathname === '/dashboard/chores') {
+      localStorage.setItem('lastSeenChoresCount', pendingChoresCount.toString());
+      setLastSeenChoresCount(pendingChoresCount);
+    }
+  }, [location.pathname, pendingChoresCount]);
+
+  useEffect(() => {
+    if (!flatId || !user) return;
+
+    // Board Notifications
+    const boardQ = query(collection(db, 'notices'), where('flatId', '==', flatId));
+    const unsubBoard = onSnapshot(boardQ, (snap) => {
+      let maxTime = 0;
+      snap.docs.forEach(doc => {
+        const time = new Date(doc.data().date).getTime();
+        if (time > maxTime) maxTime = time;
+      });
+      setLatestBoardTime(maxTime);
+    });
+
+    // Expense Notifications
+    const expQ = query(collection(db, 'expenses'), where('flatId', '==', flatId));
+    const unsubExp = onSnapshot(expQ, (snap) => {
+      let maxTime = 0;
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.paidBy !== user.uid) {
+          const time = new Date(data.date).getTime();
+          if (time > maxTime) maxTime = time;
+        }
+      });
+      setLatestExpenseTime(maxTime);
+    });
+
+    // Chores Notifications
+    const choresQ = query(collection(db, 'chores'), where('flatId', '==', flatId), where('assignedTo', '==', user.uid));
+    const unsubChores = onSnapshot(choresQ, (snap) => {
+      let count = 0;
+      snap.docs.forEach(doc => {
+        if (!doc.data().completed) count++;
+      });
+      setPendingChoresCount(count);
+    });
+
+    return () => {
+      unsubBoard();
+      unsubExp();
+      unsubChores();
+    };
+  }, [flatId, user]);
+
+  const hasNewBoard = latestBoardTime > lastSeenBoard;
+  const hasNewExpenses = latestExpenseTime > lastSeenExpenses;
+  const hasNewChores = pendingChoresCount > lastSeenChoresCount;
 
   useEffect(() => {
     setEditName(userProfile?.displayName || '');
@@ -36,7 +112,6 @@ export default function DashboardLayout() {
     };
     window.addEventListener('beforeinstallprompt', handler);
     
-    // Check if iOS and not installed
     const isIos = () => {
       const userAgent = window.navigator.userAgent.toLowerCase();
       return /iphone|ipad|ipod/.test(userAgent);
@@ -89,10 +164,22 @@ export default function DashboardLayout() {
 
   const navItems = [
     { to: '/dashboard', icon: Home, label: 'Overview', end: true },
-    { to: '/dashboard/board', icon: MessageSquare, label: 'Board' },
-    { to: '/dashboard/expenses', icon: Receipt, label: 'Expenses' },
+    { to: '/dashboard/board', icon: MessageSquare, label: 'Board', hasDot: hasNewBoard },
+    { to: '/dashboard/expenses', icon: Receipt, label: 'Expenses', hasDot: hasNewExpenses },
     { to: '/dashboard/pantry', icon: Package, label: 'Pantry' },
-    { to: '/dashboard/chores', icon: CheckSquare, label: 'Chores' },
+    { to: '/dashboard/chores', icon: CheckSquare, label: 'Chores', hasDot: hasNewChores },
+    { to: '/dashboard/vault', icon: Shield, label: 'Vault' },
+  ];
+
+  const mobilePrimaryNav = [
+    { to: '/dashboard', icon: Home, label: 'Home', end: true },
+    { to: '/dashboard/expenses', icon: Receipt, label: 'Expenses', hasDot: hasNewExpenses },
+    { to: '/dashboard/pantry', icon: Package, label: 'Pantry' },
+  ];
+
+  const mobileMoreNav = [
+    { to: '/dashboard/board', icon: MessageSquare, label: 'Notice Board', hasDot: hasNewBoard },
+    { to: '/dashboard/chores', icon: CheckSquare, label: 'Chores', hasDot: hasNewChores },
     { to: '/dashboard/vault', icon: Shield, label: 'Vault' },
   ];
 
@@ -113,12 +200,15 @@ export default function DashboardLayout() {
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${
+                `relative flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${
                   isActive ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`
               }
             >
-              <item.icon size={20} />
+              <div className="relative">
+                <item.icon size={20} />
+                {item.hasDot && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
+              </div>
               {item.label}
             </NavLink>
           ))}
@@ -127,8 +217,8 @@ export default function DashboardLayout() {
         <div className="p-4 border-t border-border space-y-2">
           <Dialog>
             <DialogTrigger render={<Button variant="ghost" className="w-full justify-start text-muted-foreground" />}>
-              <Settings size={20} className="mr-3" />
-              Profile Settings
+                <Settings size={20} className="mr-3" />
+                Profile Settings
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
@@ -147,6 +237,10 @@ export default function DashboardLayout() {
                 <div className="grid gap-2">
                   <Label htmlFor="name">Display Name</Label>
                   <Input id="name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Email Address</Label>
+                  <Input value={user?.email || ''} disabled className="bg-muted text-muted-foreground" />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="avatarUrl">Custom Avatar URL</Label>
@@ -189,11 +283,11 @@ export default function DashboardLayout() {
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </Button>
             <Dialog>
-              <DialogTrigger render={<Button variant="ghost" size="icon" />}>
-                <Avatar className="w-8 h-8">
-                  <AvatarImage src={userProfile?.photoURL} />
-                  <AvatarFallback>{userProfile?.displayName?.charAt(0)}</AvatarFallback>
-                </Avatar>
+              <DialogTrigger render={<Button variant="ghost" size="icon" className="rounded-full" />}>
+                  <Avatar className="w-8 h-8">
+                    <AvatarImage src={userProfile?.photoURL} />
+                    <AvatarFallback>{userProfile?.displayName?.charAt(0)}</AvatarFallback>
+                  </Avatar>
               </DialogTrigger>
               <DialogContent className="sm:max-w-[425px] w-[90vw] rounded-2xl">
                 <DialogHeader>
@@ -214,6 +308,10 @@ export default function DashboardLayout() {
                     <Input id="name-mobile" value={editName} onChange={(e) => setEditName(e.target.value)} />
                   </div>
                   <div className="grid gap-2">
+                    <Label>Email Address</Label>
+                    <Input value={user?.email || ''} disabled className="bg-muted text-muted-foreground" />
+                  </div>
+                  <div className="grid gap-2">
                     <Label htmlFor="avatarUrl-mobile">Custom Avatar URL</Label>
                     <Input id="avatarUrl-mobile" value={editAvatar} onChange={(e) => setEditAvatar(e.target.value)} placeholder="https://..." />
                   </div>
@@ -232,21 +330,60 @@ export default function DashboardLayout() {
 
       {/* Bottom Nav for Mobile */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border flex justify-around items-center pb-safe pt-2 px-2 z-50">
-        {navItems.map((item) => (
+        {mobilePrimaryNav.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
             className={({ isActive }) =>
-              `flex flex-col items-center p-2 min-w-[50px] transition-colors ${
+              `relative flex flex-col items-center p-2 min-w-[60px] transition-colors ${
                 isActive ? 'text-primary' : 'text-muted-foreground'
               }`
             }
           >
-            <item.icon size={24} className="mb-1" />
+            <div className="relative">
+              <item.icon size={24} className="mb-1" />
+              {item.hasDot && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
+            </div>
             <span className="text-[10px] font-medium">{item.label}</span>
           </NavLink>
         ))}
+        
+        {/* More Menu using Sheet */}
+        <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+          <SheetTrigger render={<button className="relative flex flex-col items-center justify-center p-2 min-w-[60px] transition-colors text-muted-foreground hover:text-primary" />}>
+              <div className="relative">
+                <Menu size={24} className="mb-1" />
+                {(hasNewBoard || hasNewChores) && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
+              </div>
+              <span className="text-[10px] font-medium mt-1">More</span>
+          </SheetTrigger>
+          <SheetContent side="bottom" className="rounded-t-3xl h-[50vh]">
+            <SheetHeader>
+              <SheetTitle className="text-left">More Options</SheetTitle>
+            </SheetHeader>
+            <div className="grid gap-2 py-6">
+              {mobileMoreNav.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-4 px-4 py-4 rounded-2xl transition-colors ${
+                      isActive ? 'bg-primary/10 text-primary font-medium' : 'bg-muted/50 text-foreground hover:bg-muted'
+                    }`
+                  }
+                >
+                  <div className="relative">
+                    <item.icon size={24} className={location.pathname === item.to ? 'text-primary' : 'text-muted-foreground'} />
+                    {item.hasDot && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
+                  </div>
+                  <span className="text-base">{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </SheetContent>
+        </Sheet>
       </nav>
     </div>
   );

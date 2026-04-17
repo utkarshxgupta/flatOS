@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, doc, onSnapshot, query, where, updateDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Copy, TrendingUp, Flame, Settings, UserMinus, Crown } from 'lucide-react';
+import { Copy, TrendingUp, Flame, Settings, UserMinus, Crown, Leaf } from 'lucide-react';
 import { toast } from 'sonner';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { format, parseISO, startOfMonth, subMonths } from 'date-fns';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { format, parseISO, startOfMonth, subMonths, formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function OverviewPage() {
   const { user, flatId, userProfile } = useAppContext();
@@ -20,6 +21,8 @@ export default function OverviewPage() {
   const [expenseTrends, setExpenseTrends] = useState<any[]>([]);
   const [consumptionLogs, setConsumptionLogs] = useState<any[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [editFlatName, setEditFlatName] = useState('');
+  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     if (!flatId) return;
@@ -27,7 +30,9 @@ export default function OverviewPage() {
     const flatRef = doc(db, 'flats', flatId);
     const unsubFlat = onSnapshot(flatRef, (doc) => {
       if (doc.exists()) {
-        setFlat({ id: doc.id, ...doc.data() });
+        const data = doc.data();
+        setFlat({ id: doc.id, ...data });
+        setEditFlatName(data.name);
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, `flats/${flatId}`));
 
@@ -44,7 +49,7 @@ export default function OverviewPage() {
     const unsubConsumption = onSnapshot(consumptionQuery, (snapshot) => {
       const logs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
       logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setConsumptionLogs(logs.slice(0, 5)); // Keep only 5 most recent
+      setConsumptionLogs(logs); // Keep all for health calculation
     });
 
     // Get expenses for the last 6 months for trends
@@ -70,6 +75,8 @@ export default function OverviewPage() {
 
       snapshot.docs.forEach(doc => {
         const data = doc.data() as any;
+        if (data.isPayment || data.title === 'Settlement Payment') return; // Settlements don't count towards burn rate
+        
         const amount = data.amount || 0;
         const dateStr = format(parseISO(data.date), 'MMM yyyy');
         
@@ -144,6 +151,47 @@ export default function OverviewPage() {
     }
   };
 
+  const handleRenameFlat = async () => {
+    if (!flat || !user || !isAdmin || !editFlatName.trim()) return;
+    setRenaming(true);
+    try {
+      await updateDoc(doc(db, 'flats', flat.id), { name: editFlatName.trim() });
+      toast.success('Flat renamed successfully.');
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to rename flat.');
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  // Process consumption logs for health chart
+  const healthData = useMemo(() => {
+    const categories: Record<string, number> = {
+      'Fresh Produce': 0,
+      'Protein': 0,
+      'Healthy Fats': 0,
+      'Processed': 0,
+      'High Sugar': 0,
+      'Other': 0
+    };
+
+    consumptionLogs.forEach(log => {
+      const tag = log.healthTag?.toLowerCase() || '';
+      if (tag.includes('fresh')) categories['Fresh Produce']++;
+      else if (tag.includes('protein')) categories['Protein']++;
+      else if (tag.includes('fat')) categories['Healthy Fats']++;
+      else if (tag.includes('process')) categories['Processed']++;
+      else if (tag.includes('sugar')) categories['High Sugar']++;
+      else categories['Other']++;
+    });
+
+    return Object.entries(categories)
+      .map(([name, value]) => ({ name, value }));
+  }, [consumptionLogs]);
+
+  const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#f97316', '#8b5cf6'];
+
   if (!flat) return <div>Loading...</div>;
 
   return (
@@ -162,7 +210,23 @@ export default function OverviewPage() {
                     <DialogTitle>Flat Settings</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
-                    <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Manage Members</h4>
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Flat Name</h4>
+                      <div className="flex gap-2">
+                        <Input 
+                          value={editFlatName} 
+                          onChange={e => setEditFlatName(e.target.value)} 
+                          placeholder="Enter flat name"
+                        />
+                        <Button 
+                          onClick={handleRenameFlat} 
+                          disabled={!editFlatName.trim() || editFlatName.trim() === flat.name || renaming}
+                        >
+                          {renaming ? 'Saving...' : 'Save'}
+                        </Button>
+                      </div>
+                    </div>
+                    <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mt-6">Manage Members</h4>
                     <div className="space-y-3">
                       {flatmates.map(mate => (
                         <div key={mate.id} className="flex items-center justify-between p-2 rounded-xl border bg-card">
@@ -217,7 +281,7 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
         {/* Burn Rate Card */}
         <Card className="rounded-3xl shadow-sm border-0 bg-card md:col-span-2">
           <CardHeader className="pb-2">
@@ -233,17 +297,18 @@ export default function OverviewPage() {
             
             <div className="h-[200px] w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={expenseTrends}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted))" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} dx={-10} tickFormatter={(value) => `${value}`} />
-                  <Tooltip 
-                    cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }}
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
-                    itemStyle={{ color: 'hsl(var(--foreground))' }}
-                  />
-                  <Bar dataKey="total" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                  <BarChart data={expenseTrends}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-muted)" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--color-muted-foreground)', fontSize: 12 }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--color-muted-foreground)', fontSize: 12 }} dx={-10} tickFormatter={(value) => `${value}`} />
+                    <Tooltip 
+                      cursor={{ fill: 'var(--color-muted)', opacity: 0.4 }}
+                      contentStyle={{ backgroundColor: 'var(--color-card)', borderRadius: '8px', border: '1px solid var(--color-border)' }}
+                      itemStyle={{ color: 'var(--color-foreground)' }}
+                      labelStyle={{ color: 'var(--color-foreground)' }}
+                    />
+                    <Bar dataKey="total" fill="currentColor" className="fill-primary" radius={[4, 4, 0, 0]} />
+                  </BarChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
@@ -278,6 +343,36 @@ export default function OverviewPage() {
             </CardContent>
           </Card>
 
+          {/* Household Health */}
+          <Card className="rounded-3xl shadow-sm border-0 bg-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-medium flex items-center gap-2">
+                <Leaf size={18} className="text-green-500" /> Household Diet
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {healthData.some(d => d.value > 0) ? (
+                <div className="h-[220px] w-full mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={healthData}>
+                      <PolarGrid stroke="var(--color-border)" />
+                      <PolarAngleAxis dataKey="name" tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }} />
+                      <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} axisLine={false} />
+                      <Radar name="Diet" dataKey="value" stroke="currentColor" className="stroke-primary fill-primary" fill="currentColor" fillOpacity={0.4} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: 'var(--color-card)', borderRadius: '8px', border: '1px solid var(--color-border)' }}
+                        itemStyle={{ color: 'var(--color-foreground)' }}
+                        labelStyle={{ color: 'var(--color-foreground)' }}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">No consumption data yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Recent Consumption */}
           <Card className="rounded-3xl shadow-sm border-0 bg-card">
             <CardHeader className="pb-2">
@@ -286,17 +381,23 @@ export default function OverviewPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3 mt-2">
-                {consumptionLogs.map((log) => {
+              <div className="space-y-4 mt-2">
+                {consumptionLogs.slice(0, 5).map((log) => {
                   const mate = flatmates.find(m => m.id === log.userId);
                   return (
-                    <div key={log.id} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-6 w-6">
-                          <AvatarImage src={mate?.photoURL} />
-                          <AvatarFallback>{mate?.displayName?.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <span><span className="font-medium">{mate?.displayName?.split(' ')[0]}</span> consumed <span className="font-medium">{log.itemName}</span></span>
+                    <div key={log.id} className="flex items-start gap-3 text-sm">
+                      <Avatar className="h-8 w-8 mt-0.5">
+                        <AvatarImage src={mate?.photoURL} />
+                        <AvatarFallback>{mate?.displayName?.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <p className="leading-tight">
+                          <span className="font-medium">{mate?.displayName?.split(' ')[0]}</span> consumed <span className="font-medium">{log.itemName}</span>
+                          {log.quantity && <span className="text-muted-foreground"> ({log.quantity})</span>}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {formatDistanceToNow(new Date(log.date), { addSuffix: true })}
+                        </p>
                       </div>
                     </div>
                   );
