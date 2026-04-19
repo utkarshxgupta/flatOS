@@ -235,5 +235,23 @@ service cloud.firestore {
       allow update: if isFlatMember(resource.data.flatId) && isValidShoppingListItem(request.resource.data);
       allow delete: if isFlatMember(resource.data.flatId);
     }
+    function isValidJoinRequest(data) {
+      return data.flatId is string && data.flatId.size() > 0 &&
+             data.flatName is string && data.flatName.size() > 0 &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.userDisplayName is string && data.userDisplayName.size() > 0 &&
+             (!('userPhotoURL' in data) || data.userPhotoURL == null || data.userPhotoURL is string) &&
+             (!('userEmail' in data) || data.userEmail == null || data.userEmail is string) &&
+             (!('dummyIdToClaim' in data) || data.dummyIdToClaim == null || data.dummyIdToClaim is string) &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.createdAt is number;
+    }
+
+    match /joinRequests/{requestId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isFlatMember(resource.data.flatId));
+      allow create: if isAuthenticated() && isValidJoinRequest(request.resource.data) && request.auth.uid == request.resource.data.userId;
+      allow update: if isAuthenticated() && isFlatMember(resource.data.flatId);
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.userId || isFlatMember(resource.data.flatId));
+    }
   }
 }

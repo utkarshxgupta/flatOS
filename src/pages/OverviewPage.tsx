@@ -1,17 +1,18 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, onSnapshot, query, where, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Copy, TrendingUp, Flame, Settings, UserMinus, Crown, Leaf } from 'lucide-react';
+import { Copy, TrendingUp, Flame, Settings, UserMinus, Crown, Leaf, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 import { format, parseISO, startOfMonth, subMonths, formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { completeJoin } from '../lib/onboarding';
 
 export default function OverviewPage() {
   const { user, flatId, userProfile } = useAppContext();
@@ -23,6 +24,7 @@ export default function OverviewPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editFlatName, setEditFlatName] = useState('');
   const [renaming, setRenaming] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<any[]>([]);
 
   useEffect(() => {
     if (!flatId) return;
@@ -43,6 +45,12 @@ export default function OverviewPage() {
       users.sort((a, b) => (b.karma || 0) - (a.karma || 0));
       setFlatmates(users);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
+
+    // Get Join Requests
+    const reqQuery = query(collection(db, 'joinRequests'), where('flatId', '==', flatId), where('status', '==', 'pending'));
+    const unsubReqs = onSnapshot(reqQuery, (snapshot) => {
+      setJoinRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
     // Get consumption logs
     const consumptionQuery = query(collection(db, 'consumptionLogs'), where('flatId', '==', flatId));
@@ -104,6 +112,7 @@ export default function OverviewPage() {
       unsubUsers();
       unsubExpenses();
       unsubConsumption();
+      unsubReqs();
     };
   }, [flatId]);
 
@@ -165,6 +174,28 @@ export default function OverviewPage() {
     }
   };
 
+  const approveJoinRequest = async (request: any) => {
+    if (!flatId) return;
+    try {
+      await completeJoin(flatId, request.userId, request.dummyIdToClaim);
+      await deleteDoc(doc(db, 'joinRequests', request.id));
+      toast.success(`${request.userDisplayName} has been approved and added to the flat!`);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to approve request');
+    }
+  };
+
+  const rejectJoinRequest = async (requestId: string) => {
+    try {
+      await deleteDoc(doc(db, 'joinRequests', requestId));
+      toast.success('Join request rejected.');
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to reject request');
+    }
+  };
+
   // Process consumption logs for health chart
   const healthData = useMemo(() => {
     const categories: Record<string, number> = {
@@ -196,6 +227,44 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      {isAdmin && joinRequests.length > 0 && (
+        <Card className="border-amber-500/50 bg-amber-500/5 shadow-sm rounded-3xl">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg font-medium flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+              </span>
+              Pending Join Requests ({joinRequests.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {joinRequests.map(req => (
+              <div key={req.id} className="flex items-center justify-between p-3 rounded-2xl bg-card border">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={req.userPhotoURL} />
+                    <AvatarFallback>{req.userDisplayName?.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-medium text-sm">{req.userDisplayName}</p>
+                    <p className="text-xs text-muted-foreground">{req.userEmail}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" className="h-8 rounded-full border-red-200 text-red-600 hover:bg-red-50" onClick={() => rejectJoinRequest(req.id)}>
+                    <X size={14} className="mr-1" /> Deny
+                  </Button>
+                  <Button size="sm" className="h-8 rounded-full bg-primary hover:bg-primary/90" onClick={() => approveJoinRequest(req)}>
+                    <Check size={14} className="mr-1" /> Approve
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <div className="flex items-center gap-3">

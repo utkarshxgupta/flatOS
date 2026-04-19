@@ -29,6 +29,9 @@ export default function ExpensesPage() {
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [splitWith, setSplitWith] = useState<string[]>([]);
+  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editSplitBetween, setEditSplitBetween] = useState<string[]>([]);
 
   // Recurring Expense State
   const [recTitle, setRecTitle] = useState('');
@@ -78,6 +81,8 @@ export default function ExpensesPage() {
     if (!file) return;
 
     setLoading(true);
+    setReceiptParsingStatus('loading');
+    setIsReceiptDialogOpen(true);
     toast.info('Analyzing receipt with AI...');
     
     try {
@@ -95,11 +100,14 @@ export default function ExpensesPage() {
           addToPantry: item.isGrocery ?? false
         }));
         setParsedItems(itemsWithSplit);
+        setReceiptParsingStatus('success');
         toast.success('Receipt parsed successfully!');
       };
       reader.readAsDataURL(file);
     } catch (error) {
       console.error(error);
+      setIsReceiptDialogOpen(false);
+      setReceiptParsingStatus('');
       toast.error('Failed to parse receipt');
     } finally {
       setLoading(false);
@@ -146,6 +154,10 @@ export default function ExpensesPage() {
   const [showShoppingListDialog, setShowShoppingListDialog] = useState(false);
   const [selectedMatchesToCheckout, setSelectedMatchesToCheckout] = useState<string[]>([]);
   const [isFinalizingSubmit, setIsFinalizingSubmit] = useState(false);
+  
+  // New Dialog State for Parsed Receipt Items
+  const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
+  const [receiptParsingStatus, setReceiptParsingStatus] = useState<'' | 'loading' | 'success'>('');
 
   const addQuantities = (q1: string, q2: string) => {
     const p1 = parseQuantity(q1);
@@ -293,6 +305,8 @@ export default function ExpensesPage() {
       setReceiptTotal(0);
       setReceiptMerchant('');
       setShowShoppingListDialog(false);
+      setIsReceiptDialogOpen(false);
+      setReceiptParsingStatus('');
       setShoppingListMatches([]);
       setSelectedMatchesToCheckout([]);
     } catch (error) {
@@ -577,9 +591,6 @@ export default function ExpensesPage() {
     setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
-  const [editingExpense, setEditingExpense] = useState<any>(null);
-  const [editAmount, setEditAmount] = useState('');
-
   const [settleDialogOpen, setSettleDialogOpen] = useState(false);
   const [settleTarget, setSettleTarget] = useState<string>('');
   const [settleAmount, setSettleAmount] = useState('');
@@ -615,9 +626,15 @@ export default function ExpensesPage() {
 
   const saveEditedExpense = async () => {
     if (!editingExpense) return;
+    if (editSplitBetween.length === 0) {
+      toast.error('At least one person must be selected for the split.');
+      return;
+    }
+    
     try {
       await updateDoc(doc(db, 'expenses', editingExpense.id), {
-        amount: parseFloat(editAmount)
+        amount: parseFloat(editAmount),
+        splitBetween: editSplitBetween
       });
       toast.success('Expense updated');
       setEditingExpense(null);
@@ -625,6 +642,27 @@ export default function ExpensesPage() {
       handleFirestoreError(error, OperationType.UPDATE, `expenses/${editingExpense.id}`);
       toast.error('Failed to update expense');
     }
+  };
+
+  const getSplitText = (splitBetween: string[], paidBy: string) => {
+    if (!splitBetween || splitBetween.length === 0) return '';
+    if (splitBetween.length === flatmates.length) return 'Split equally';
+    
+    const payerIncluded = splitBetween.includes(paidBy);
+    const otherNames = splitBetween
+      .filter((id: string) => id !== paidBy)
+      .map((id: string) => flatmates.find((m: any) => m.id === id)?.displayName?.split(' ')[0] || 'Unknown');
+    
+    if (otherNames.length === 0) {
+      if (payerIncluded) return 'Personal Expense';
+      return 'Not split';
+    }
+
+    if (!payerIncluded) {
+      return `Paid for ${otherNames.join(', ')}`;
+    }
+    
+    return `Split with ${otherNames.join(', ')}`;
   };
 
   return (
@@ -722,10 +760,11 @@ export default function ExpensesPage() {
                               <div key={exp.id} className="flex justify-between items-center text-sm py-1">
                                 <div className="flex-1">
                                   <p className="font-medium">{exp.title}</p>
+                                  <p className="text-[10px] text-muted-foreground">{getSplitText(exp.splitBetween, exp.paidBy)}</p>
                                   <div className="flex gap-2 mt-1">
                                     {exp.paidBy === user?.uid && (
                                       <>
-                                        <button onClick={() => { setEditingExpense(exp); setEditAmount(exp.amount.toString()); }} className="text-xs text-primary hover:underline flex items-center gap-1"><Edit2 size={10} /> Edit</button>
+                                        <button onClick={() => { setEditingExpense(exp); setEditAmount(exp.amount.toString()); setEditSplitBetween(exp.splitBetween || []); }} className="text-xs text-primary hover:underline flex items-center gap-1"><Edit2 size={10} /> Edit</button>
                                         <button onClick={() => deleteExpense(exp.id)} className="text-xs text-red-500 hover:underline flex items-center gap-1"><Trash2 size={10} /> Delete</button>
                                       </>
                                     )}
@@ -763,10 +802,13 @@ export default function ExpensesPage() {
                       <div>
                         <p className="font-medium">{exp.title}</p>
                         <p className="text-xs text-muted-foreground">Paid by {payer?.displayName || 'Unknown'}</p>
+                        {!exp.isPayment && (
+                          <p className="text-[10px] text-muted-foreground opacity-80">{getSplitText(exp.splitBetween, exp.paidBy)}</p>
+                        )}
                         <div className="flex gap-2 mt-1">
                           {exp.paidBy === user?.uid && (
                             <>
-                              <button onClick={() => { setEditingExpense(exp); setEditAmount(exp.amount.toString()); }} className="text-xs text-primary hover:underline flex items-center gap-1"><Edit2 size={10} /> Edit</button>
+                              <button onClick={() => { setEditingExpense(exp); setEditAmount(exp.amount.toString()); setEditSplitBetween(exp.splitBetween || []); }} className="text-xs text-primary hover:underline flex items-center gap-1"><Edit2 size={10} /> Edit</button>
                               <button onClick={() => deleteExpense(exp.id)} className="text-xs text-red-500 hover:underline flex items-center gap-1"><Trash2 size={10} /> Delete</button>
                             </>
                           )}
@@ -802,7 +844,7 @@ export default function ExpensesPage() {
         <Dialog open={!!editingExpense} onOpenChange={(open) => !open && setEditingExpense(null)}>
           <DialogContent className="sm:max-w-md rounded-3xl">
             <DialogHeader>
-              <DialogTitle>Edit Expense Amount</DialogTitle>
+              <DialogTitle>Edit Expense</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -814,6 +856,33 @@ export default function ExpensesPage() {
                   placeholder="0.00" 
                 />
               </div>
+              <div className="space-y-2">
+                <Label>Split Between</Label>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {flatmates.map(mate => {
+                    const isSelected = editSplitBetween.includes(mate.id);
+                    return (
+                      <button
+                        key={mate.id}
+                        onClick={() => {
+                          setEditSplitBetween(prev => 
+                            prev.includes(mate.id) ? prev.filter(id => id !== mate.id) : [...prev, mate.id]
+                          );
+                        }}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${
+                          isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        <Avatar className="h-5 w-5">
+                          <AvatarImage src={mate.photoURL} />
+                          <AvatarFallback>{mate.displayName?.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        {mate.displayName?.split(' ')[0]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <Button className="w-full rounded-full" onClick={saveEditedExpense}>Save Changes</Button>
             </div>
           </DialogContent>
@@ -823,7 +892,7 @@ export default function ExpensesPage() {
           <div className="flex flex-col gap-6 max-w-2xl mx-auto">
             {/* AI Receipt Upload */}
             <Card className="rounded-3xl shadow-sm border-0 bg-card overflow-hidden h-fit p-0">
-              <div className="bg-primary/5 p-6 border-b border-primary/10 text-center">
+              <div className="bg-primary/5 p-6 text-center">
                 <div className="mx-auto w-16 h-16 bg-card rounded-full flex items-center justify-center shadow-sm mb-4 text-primary">
                   <Camera size={28} />
                 </div>
@@ -840,71 +909,12 @@ export default function ExpensesPage() {
                 />
                 <Button 
                   onClick={() => fileInputRef.current?.click()} 
-                  disabled={loading}
                   className="rounded-full"
                 >
-                  {loading ? 'Analyzing...' : 'Upload Receipt'}
-                  {!loading && <Upload size={16} className="ml-2" />}
+                  Upload Receipt
+                  <Upload size={16} className="ml-2" />
                 </Button>
               </div>
-
-              {parsedItems.length > 0 && (
-                <CardContent className="p-0">
-                  <div className="p-4 bg-muted/30 border-b flex justify-between items-center">
-                    <span className="font-medium">Parsed Items</span>
-                    <span className="font-mono text-sm">Total: {receiptTotal.toFixed(2)}</span>
-                  </div>
-                  <ScrollArea className="h-[400px]">
-                    <div className="divide-y">
-                      {parsedItems.map((item, idx) => (
-                        <div key={idx} className="p-4 space-y-3">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-medium text-sm">{item.name}</p>
-                              <p className="text-xs text-muted-foreground">Qty: {item.quantity} • {item.category}</p>
-                            </div>
-                            <span className="font-mono text-sm font-medium">{item.price.toFixed(2)}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {flatmates.map(mate => {
-                              const isSelected = item.splitBetween.includes(mate.id);
-                              return (
-                                <button
-                                  key={mate.id}
-                                  onClick={() => toggleItemSplit(idx, mate.id)}
-                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition-colors ${
-                                    isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                                  }`}
-                                >
-                                  {isSelected ? <CheckCircle2 size={12} /> : <Circle size={12} />}
-                                  {mate.displayName?.split(' ')[0]}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <div className="flex items-center gap-2 mt-2">
-                            <input 
-                              type="checkbox" 
-                              id={`pantry-${idx}`} 
-                              checked={item.addToPantry} 
-                              onChange={() => toggleAddToPantry(idx)}
-                              className="rounded border-gray-300 text-primary focus:ring-primary"
-                            />
-                            <label htmlFor={`pantry-${idx}`} className="text-xs text-muted-foreground cursor-pointer">
-                              Add to Digital Pantry
-                            </label>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                  <div className="p-4 border-t bg-muted/50">
-                    <Button className="w-full rounded-full" onClick={submitParsedReceipt} disabled={loading}>
-                      Save Items & Update Pantry
-                    </Button>
-                  </div>
-                </CardContent>
-              )}
             </Card>
 
             {/* Splitwise Import (Compact Dialog) */}
@@ -1165,6 +1175,83 @@ export default function ExpensesPage() {
           </DialogContent>
         </Dialog>
       </Tabs>
+
+      <Dialog open={isReceiptDialogOpen} onOpenChange={(open) => {
+        if (!open && receiptParsingStatus !== 'loading') setIsReceiptDialogOpen(false);
+      }}>
+        <DialogContent className="sm:max-w-md rounded-3xl max-h-[85vh] overflow-hidden flex flex-col p-0">
+          {receiptParsingStatus === 'loading' && (
+            <div className="flex flex-col items-center justify-center p-12 text-center h-full">
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping"></div>
+                <div className="relative flex items-center justify-center w-full h-full bg-primary text-primary-foreground rounded-full animate-bounce">
+                  <Receipt size={40} />
+                </div>
+              </div>
+              <h3 className="text-xl font-bold mb-2">AI is reading your receipt...</h3>
+              <p className="text-muted-foreground text-sm">Extracting items, prices, and finding grocery matches.</p>
+            </div>
+          )}
+          
+          {receiptParsingStatus === 'success' && (
+            <>
+              <div className="p-4 bg-muted/30 border-b flex justify-between items-center z-10 sticky top-0 backdrop-blur-md">
+                <span className="font-semibold text-lg">Parsed Items</span>
+                <span className="font-mono font-medium">Total: {receiptTotal.toFixed(2)}</span>
+              </div>
+              <ScrollArea className="flex-1 overflow-y-auto w-full h-full" style={{ maxHeight: 'calc(85vh - 140px)' }}>
+                <div className="divide-y w-full">
+                  {parsedItems.map((item, idx) => (
+                    <div key={idx} className="p-4 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium text-sm">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">Qty: {item.quantity} • {item.category}</p>
+                        </div>
+                        <span className="font-mono text-sm font-medium">{item.price.toFixed(2)}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {flatmates.map(mate => {
+                          const isSelected = item.splitBetween.includes(mate.id);
+                          return (
+                            <button
+                              key={mate.id}
+                              onClick={() => toggleItemSplit(idx, mate.id)}
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition-all active:scale-95 ${
+                                isSelected ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                              }`}
+                            >
+                              {isSelected ? <CheckCircle2 size={12} /> : <Circle size={12} />}
+                              {mate.displayName?.split(' ')[0]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <input 
+                          type="checkbox" 
+                          id={`dialog-pantry-${idx}`} 
+                          checked={item.addToPantry} 
+                          onChange={() => toggleAddToPantry(idx)}
+                          className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                        />
+                        <label htmlFor={`dialog-pantry-${idx}`} className="text-xs text-muted-foreground cursor-pointer select-none">
+                          Add to Digital Pantry
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+              <div className="p-4 border-t bg-background sticky bottom-0">
+                <Button className="w-full rounded-full" size="lg" onClick={submitParsedReceipt} disabled={loading}>
+                  Save Items & Update Pantry
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showShoppingListDialog} onOpenChange={setShowShoppingListDialog}>
         <DialogContent className="sm:max-w-md rounded-3xl">

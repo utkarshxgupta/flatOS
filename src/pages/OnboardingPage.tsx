@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, addDoc, doc, updateDoc, arrayUnion, getDoc, query, where, getDocs, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, arrayUnion, getDoc, query, where, getDocs, writeBatch, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,31 @@ export default function OnboardingPage() {
   const [dummyUsers, setDummyUsers] = useState<any[]>([]);
   const [showClaimScreen, setShowClaimScreen] = useState(false);
   const [flatToJoin, setFlatToJoin] = useState<any>(null);
+
+  const [pendingRequest, setPendingRequest] = useState<any>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'joinRequests'), where('userId', '==', user.uid), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        setPendingRequest({ id: snap.docs[0].id, ...snap.docs[0].data() });
+      } else {
+        setPendingRequest(null);
+      }
+    });
+
+    const unsubUser = onSnapshot(doc(db, 'users', user.uid), (snap) => {
+      if (snap.exists() && snap.data().flatId) {
+        refreshProfile(); 
+      }
+    });
+
+    return () => {
+      unsub();
+      unsubUser();
+    };
+  }, [user]);
 
   const handleCreateFlat = async () => {
     if (!flatName || !user) return;
@@ -75,103 +100,71 @@ export default function OnboardingPage() {
         return;
       }
 
-      await completeJoin(joinCode);
+      await submitJoinRequest(joinCode, flatSnap.data().name);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `flats/${joinCode}`);
-      toast.error('Failed to join flat');
+      toast.error('Failed to verify flat');
       setLoading(false);
     }
   };
 
-  const completeJoin = async (flatIdToJoin: string, dummyIdToClaim?: string) => {
+  const submitJoinRequest = async (flatIdToJoin: string, flatName: string, dummyIdToClaim?: string) => {
     if (!user) return;
     setLoading(true);
     try {
-      const flatRef = doc(db, 'flats', flatIdToJoin);
-      
-      if (dummyIdToClaim) {
-        // Claiming a dummy persona
-        const batch = writeBatch(db);
-        
-        // 1. Update expenses where dummy paid
-        const expPaidQuery = query(collection(db, 'expenses'), where('paidBy', '==', dummyIdToClaim));
-        const expPaidSnap = await getDocs(expPaidQuery);
-        expPaidSnap.forEach(d => batch.update(d.ref, { paidBy: user.uid }));
-
-        // 2. Update expenses where dummy is in splitBetween
-        const expSplitQuery = query(collection(db, 'expenses'), where('splitBetween', 'array-contains', dummyIdToClaim));
-        const expSplitSnap = await getDocs(expSplitQuery);
-        expSplitSnap.forEach(d => {
-          const data = d.data();
-          const newSplit = data.splitBetween.filter((id: string) => id !== dummyIdToClaim);
-          newSplit.push(user.uid);
-          batch.update(d.ref, { splitBetween: newSplit });
-        });
-
-        // 3. Update chores
-        const choreQuery = query(collection(db, 'chores'), where('assignedTo', '==', dummyIdToClaim));
-        const choreSnap = await getDocs(choreQuery);
-        choreSnap.forEach(d => batch.update(d.ref, { assignedTo: user.uid }));
-
-        // 4. Update karma logs
-        const karmaQuery = query(collection(db, 'karmaLogs'), where('userId', '==', dummyIdToClaim));
-        const karmaSnap = await getDocs(karmaQuery);
-        karmaSnap.forEach(d => batch.update(d.ref, { userId: user.uid }));
-
-        // 5. Update recurring expenses
-        const recPaidQuery = query(collection(db, 'recurringExpenses'), where('paidBy', '==', dummyIdToClaim));
-        const recPaidSnap = await getDocs(recPaidQuery);
-        recPaidSnap.forEach(d => batch.update(d.ref, { paidBy: user.uid }));
-
-        const recSplitQuery = query(collection(db, 'recurringExpenses'), where('splitBetween', 'array-contains', dummyIdToClaim));
-        const recSplitSnap = await getDocs(recSplitQuery);
-        recSplitSnap.forEach(d => {
-          const data = d.data();
-          const newSplit = data.splitBetween.filter((id: string) => id !== dummyIdToClaim);
-          newSplit.push(user.uid);
-          batch.update(d.ref, { splitBetween: newSplit });
-        });
-
-        // 6. Get dummy user data to transfer karma
-        const dummyRef = doc(db, 'users', dummyIdToClaim);
-        const dummySnap = await getDoc(dummyRef);
-        const dummyKarma = dummySnap.exists() ? dummySnap.data().karma || 0 : 0;
-
-        // 7. Delete dummy user
-        batch.delete(dummyRef);
-
-        // 8. Update flat members (remove dummy, add real)
-        const flatSnap = await getDoc(flatRef);
-        if (flatSnap.exists()) {
-          const members = flatSnap.data().members || [];
-          const newMembers = members.filter((id: string) => id !== dummyIdToClaim);
-          if (!newMembers.includes(user.uid)) newMembers.push(user.uid);
-          batch.update(flatRef, { members: newMembers });
-        }
-
-        // 9. Update real user
-        const userRef = doc(db, 'users', user.uid);
-        batch.update(userRef, { flatId: flatIdToJoin, karma: dummyKarma });
-
-        await batch.commit();
-      } else {
-        // Normal join
-        await updateDoc(flatRef, {
-          members: arrayUnion(user.uid)
-        });
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, { flatId: flatIdToJoin });
-      }
-
-      await refreshProfile();
-      toast.success('Joined flat successfully!');
+      await addDoc(collection(db, 'joinRequests'), {
+        flatId: flatIdToJoin,
+        flatName,
+        userId: user.uid,
+        userDisplayName: user.displayName || 'Anonymous',
+        userPhotoURL: user.photoURL || '',
+        userEmail: user.email || '',
+        dummyIdToClaim: dummyIdToClaim || null,
+        status: 'pending',
+        createdAt: Date.now()
+      });
+      toast.success('Join request sent!');
     } catch (error) {
       console.error(error);
-      toast.error('Failed to join flat');
+      toast.error('Failed to send join request');
     } finally {
       setLoading(false);
+      setShowClaimScreen(false);
     }
   };
+
+  if (pendingRequest) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md rounded-3xl shadow-xl border-0 overflow-hidden">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Awaiting Approval</CardTitle>
+            <CardDescription>
+              Your request is pending flat admin approval.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center pb-8 pt-4">
+            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <div className="w-12 h-12 bg-primary rounded-full animate-pulse" />
+            </div>
+            <p className="font-medium text-lg">Requested to join</p>
+            <p className="text-xl font-bold text-primary mt-1">{pendingRequest.flatName || 'a flat'}</p>
+            <p className="text-sm text-muted-foreground mt-4">Hang tight! You'll be let in once an admin approves your request.</p>
+            <Button 
+              variant="outline" 
+              className="mt-8 rounded-full" 
+              onClick={async () => {
+                await deleteDoc(doc(db, 'joinRequests', pendingRequest.id));
+                setPendingRequest(null);
+              }}
+            >
+              Cancel Request
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (showClaimScreen) {
     return (
@@ -189,7 +182,7 @@ export default function OnboardingPage() {
                 <div 
                   key={dummy.id} 
                   className="flex items-center gap-4 p-3 rounded-2xl border bg-card hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() => completeJoin(flatToJoin.id, dummy.id)}
+                  onClick={() => submitJoinRequest(flatToJoin.id, flatToJoin.name, dummy.id)}
                 >
                   <Avatar className="h-10 w-10">
                     <AvatarImage src={dummy.photoURL} />
@@ -207,7 +200,7 @@ export default function OnboardingPage() {
               <Button 
                 variant="outline" 
                 className="w-full rounded-full" 
-                onClick={() => completeJoin(flatToJoin.id)}
+                onClick={() => submitJoinRequest(flatToJoin.id, flatToJoin.name)}
                 disabled={loading}
               >
                 {loading ? 'Joining...' : "None of these, I'm new"}
