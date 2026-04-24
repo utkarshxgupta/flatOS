@@ -15,7 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Camera, Upload, Receipt, CheckCircle2, Circle, Repeat, Play, Trash2, ChevronDown, ChevronUp, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { addMonths, isPast, parseISO } from 'date-fns';
+import { addMonths, isPast, parseISO, format } from 'date-fns';
 
 export default function ExpensesPage() {
   const { user, flatId } = useAppContext();
@@ -77,40 +77,51 @@ export default function ExpensesPage() {
   }, [flatId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []) as File[];
+    if (!files.length) return;
 
     setLoading(true);
     setReceiptParsingStatus('loading');
     setIsReceiptDialogOpen(true);
-    toast.info('Analyzing receipt with AI...');
+    toast.info('Analyzing receipt(s) with AI...');
     
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        const result = await parseReceipt(base64String, file.type);
-        
-        setReceiptTotal(result.totalAmount);
-        setReceiptMerchant(result.merchantName || 'Receipt');
-        // Initialize all items as shared by everyone by default
-        const itemsWithSplit = result.items.map((item: any) => ({
-          ...item,
-          splitBetween: flatmates.map(m => m.id),
-          addToPantry: item.isGrocery ?? false
-        }));
-        setParsedItems(itemsWithSplit);
-        setReceiptParsingStatus('success');
-        toast.success('Receipt parsed successfully!');
-      };
-      reader.readAsDataURL(file);
+      const readFilesAsBase64 = files.map(file => {
+        return new Promise<{base64Image: string, mimeType: string}>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64String = (reader.result as string).split(',')[1];
+            resolve({ base64Image: base64String, mimeType: file.type });
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      });
+
+      const images = await Promise.all(readFilesAsBase64);
+      const result = await parseReceipt(images);
+      
+      setReceiptTotal(result.totalAmount);
+      setReceiptMerchant(result.merchantName || 'Receipt');
+      // Initialize all items as shared by everyone by default
+      const itemsWithSplit = result.items.map((item: any) => ({
+        ...item,
+        splitBetween: flatmates.map(m => m.id),
+        addToPantry: item.isGrocery ?? false
+      }));
+      setParsedItems(itemsWithSplit);
+      setReceiptParsingStatus('success');
+      toast.success('Receipt(s) parsed successfully!');
     } catch (error) {
       console.error(error);
       setIsReceiptDialogOpen(false);
       setReceiptParsingStatus('');
-      toast.error('Failed to parse receipt');
+      toast.error('Failed to parse receipt(s)');
     } finally {
       setLoading(false);
+      if (e.target) {
+        e.target.value = ''; // reset input
+      }
     }
   };
 
@@ -745,6 +756,7 @@ export default function ExpensesPage() {
                           <div>
                             <p className="font-medium">{group.title}</p>
                             <p className="text-xs text-muted-foreground">Paid by {payer?.displayName || 'Unknown'} • {group.items.length} items</p>
+                            {group.date && <p className="text-[10px] text-muted-foreground/80 mt-0.5">Added on {format(parseISO(group.date), 'MMM d, yyyy h:mm a')}</p>}
                           </div>
                         </div>
                         <div className="text-right flex items-center gap-3">
@@ -761,6 +773,7 @@ export default function ExpensesPage() {
                                 <div className="flex-1">
                                   <p className="font-medium">{exp.title}</p>
                                   <p className="text-[10px] text-muted-foreground">{getSplitText(exp.splitBetween, exp.paidBy)}</p>
+                                  {exp.date && <p className="text-[10px] text-muted-foreground/80 mt-0.5">Added on {format(parseISO(exp.date), 'MMM d, yyyy h:mm a')}</p>}
                                   <div className="flex gap-2 mt-1">
                                     {exp.paidBy === user?.uid && (
                                       <>
@@ -805,6 +818,7 @@ export default function ExpensesPage() {
                         {!exp.isPayment && (
                           <p className="text-[10px] text-muted-foreground opacity-80">{getSplitText(exp.splitBetween, exp.paidBy)}</p>
                         )}
+                        {exp.date && <p className="text-[10px] text-muted-foreground/80 mt-0.5">Added on {format(parseISO(exp.date), 'MMM d, yyyy h:mm a')}</p>}
                         <div className="flex gap-2 mt-1">
                           {exp.paidBy === user?.uid && (
                             <>
@@ -903,6 +917,7 @@ export default function ExpensesPage() {
                 <input 
                   type="file" 
                   accept="image/*" 
+                  multiple
                   className="hidden" 
                   ref={fileInputRef}
                   onChange={handleFileUpload}

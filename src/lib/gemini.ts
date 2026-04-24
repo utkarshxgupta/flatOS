@@ -87,22 +87,22 @@ export async function parseSplitwiseScreenshot(base64Image: string, mimeType: st
   }
 }
 
-export async function parseReceipt(base64Image: string, mimeType: string) {
+export async function parseReceipt(images: {base64Image: string, mimeType: string}[]) {
   try {
-    const imagePart = {
+    const imageParts = images.map(img => ({
       inlineData: {
-        mimeType,
-        data: base64Image,
+        mimeType: img.mimeType,
+        data: img.base64Image,
       },
-    };
+    }));
     
     const textPart = {
-      text: "Analyze this receipt from a quick-commerce app (like Zepto, Blinkit, Swiggy Instamart) OR a food delivery app (like Swiggy, Zomato). Extract the merchant name (e.g., 'Zepto', 'Blinkit', 'Swiggy', 'Zomato'). Extract the line items, their quantities, and their total prices. Also extract the total amount of the receipt. If you can determine the category (e.g., Groceries, Snacks, Utilities, Restaurant Food), include that too. For grocery items, fetch the quantity as a string including the weight/volume and count (e.g., '400 g x 1', '120 g x 2', '450 ml x 1') so that inventory management is accurate. Also, determine if the item is a grocery/pantry item (isGrocery: true) or if it is prepared food for immediate consumption from a restaurant (isGrocery: false).",
+      text: "Analyze these receipts from a quick-commerce app (like Zepto, Blinkit, Swiggy Instamart) OR a food delivery app (like Swiggy, Zomato). Extract the merchant name (e.g., 'Zepto', 'Blinkit', 'Swiggy', 'Zomato'). Extract the line items, their quantities, and their total prices. Also extract the combined total amount of the receipts. If you can determine the category (e.g., Groceries, Snacks, Utilities, Restaurant Food), include that too. For grocery items, fetch the quantity as a string including the weight/volume and count (e.g., '400 g x 1', '120 g x 2', '450 ml x 1') so that inventory management is accurate. Also, determine if the item is a grocery/pantry item (isGrocery: true) or if it is prepared food for immediate consumption from a restaurant (isGrocery: false).",
     };
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts: [imagePart, textPart] },
+      contents: { parts: [...imageParts, textPart] },
       config: {
         responseMimeType: "application/json",
         responseSchema: {
