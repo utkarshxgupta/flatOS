@@ -18,7 +18,7 @@ export default function LandingPage() {
           <Home size={40} />
         </div>
         <h1 className="text-5xl font-bold tracking-tight mb-4 text-balance">
-          Welcome to FlatOS
+          Welcome to <span className="inline-flex items-baseline"><span className="italic font-normal mr-2" style={{ fontFamily: '"IM Fell English", serif' }}>Flat</span><span className="not-italic font-normal" style={{ fontFamily: '"IM Fell English", serif' }}>OS</span></span>
         </h1>
         <p className="text-xl text-muted-foreground max-w-md mb-12 text-balance">
           The centralized super-app for shared living. Manage expenses, pantry, and chores without the drama.

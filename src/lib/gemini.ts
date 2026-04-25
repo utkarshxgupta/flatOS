@@ -120,9 +120,10 @@ export async function parseReceipt(images: {base64Image: string, mimeType: strin
                   price: { type: Type.NUMBER, description: "Total price for this line item" },
                   category: { type: Type.STRING, description: "Category like Groceries, Snacks, Cleaning, Restaurant Food, etc." },
                   healthTag: { type: Type.STRING, description: "If food, flag as 'High Sugar', 'Fresh Produce', 'Refined Oils', etc. Otherwise leave empty." },
-                  isGrocery: { type: Type.BOOLEAN, description: "True if this is a grocery/pantry item, false if it is prepared food from a restaurant for immediate consumption" }
+                  isGrocery: { type: Type.BOOLEAN, description: "True if this is a grocery/pantry item, false if it is prepared food from a restaurant for immediate consumption" },
+                  emojis: { type: Type.STRING, description: "Suggest up to 3 matching emojis to describe this item" }
                 },
-                required: ["name", "quantity", "price", "category", "isGrocery"]
+                required: ["name", "quantity", "price", "category", "isGrocery", "emojis"]
               }
             }
           },

@@ -154,7 +154,7 @@ export default function NoticeBoardPage() {
             const author = flatmates.find(m => m.id === notice.authorId);
             return (
               <Card key={notice.id} className="rounded-3xl shadow-sm border-0 bg-card">
-                <CardContent className="p-5">
+                <CardContent className="p-6">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <Avatar className="h-10 w-10">
@@ -297,9 +297,9 @@ export default function NoticeBoardPage() {
           </CardHeader>
           <CardContent>
             <Tabs value={type} onValueChange={(v) => setType(v as any)} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-4 bg-muted rounded-full p-1">
-                <TabsTrigger value="announcement" className="rounded-full text-xs"><MessageSquare size={14} className="mr-1"/> Post</TabsTrigger>
-                <TabsTrigger value="poll" className="rounded-full text-xs"><BarChart2 size={14} className="mr-1"/> Poll</TabsTrigger>
+              <TabsList className="grid w-full grid-cols-2 mb-4 bg-muted/70 rounded-2xl p-1 shadow-inner border border-border/40 min-h-[44px] backdrop-blur-md">
+                <TabsTrigger value="announcement" className="rounded-xl text-xs font-semibold data-active:shadow-md data-active:bg-background transition-all"><MessageSquare size={14} className="mr-1"/> Post</TabsTrigger>
+                <TabsTrigger value="poll" className="rounded-xl text-xs font-semibold data-active:shadow-md data-active:bg-background transition-all"><BarChart2 size={14} className="mr-1"/> Poll</TabsTrigger>
               </TabsList>
               
               <div className="space-y-4">

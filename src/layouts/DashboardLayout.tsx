@@ -1,13 +1,13 @@
+import { motion, AnimatePresence } from 'motion/react';
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { Home, Receipt, Package, CheckSquare, LogOut, Moon, Sun, Download, UserCircle, Settings, MessageSquare, Shield, Menu } from 'lucide-react';
+import { Home, Receipt, Package, CheckSquare, LogOut, Moon, Sun, Download, UserCircle, Settings, MessageSquare, Shield, Menu, X as XIcon } from 'lucide-react';
 import { logOut, db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, updateDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAppContext } from '../AppContext';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '../components/theme-provider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -184,11 +184,14 @@ export default function DashboardLayout() {
   ];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col md:flex-row font-sans text-foreground">
+    <div className="h-screen overflow-hidden bg-background flex flex-col md:flex-row font-sans text-foreground">
       {/* Sidebar for Desktop */}
-      <aside className="hidden md:flex w-64 flex-col bg-card border-r border-border">
+      <aside className="hidden md:flex w-64 flex-col bg-card backdrop-blur-2xl border-r border-white/20 dark:border-white/10 relative z-10">
         <div className="p-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">FlatOS</h1>
+          <h1 className="text-3xl tracking-tight flex items-baseline">
+            <span className="italic font-normal mr-1.5" style={{ fontFamily: '"IM Fell English", serif' }}>Flat</span>
+            <span className="not-italic font-normal" style={{ fontFamily: '"IM Fell English", serif' }}>OS</span>
+          </h1>
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </Button>
@@ -276,8 +279,11 @@ export default function DashboardLayout() {
         )}
         
         {/* Mobile Header */}
-        <div className="md:hidden flex items-center justify-between p-4 bg-card border-b border-border">
-          <h1 className="text-xl font-bold tracking-tight">FlatOS</h1>
+        <div className="md:hidden flex items-center justify-between p-4 bg-card backdrop-blur-xl border-b border-white/20 dark:border-white/10 sticky top-0 z-30">
+          <h1 className="text-2xl tracking-tight flex items-baseline">
+            <span className="italic font-normal mr-1.5" style={{ fontFamily: '"IM Fell English", serif' }}>Flat</span>
+            <span className="not-italic font-normal" style={{ fontFamily: '"IM Fell English", serif' }}>OS</span>
+          </h1>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -329,7 +335,7 @@ export default function DashboardLayout() {
       </main>
 
       {/* Bottom Nav for Mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border flex justify-around items-center pb-safe pt-2 px-2 z-50">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card backdrop-blur-2xl border-t border-white/20 dark:border-white/10 flex justify-around items-center pb-safe pt-2 px-2 z-50">
         {mobilePrimaryNav.map((item) => (
           <NavLink
             key={item.to}
@@ -349,42 +355,68 @@ export default function DashboardLayout() {
           </NavLink>
         ))}
         
-        {/* More Menu using Sheet */}
-        <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-          <SheetTrigger render={<button className="relative flex flex-col items-center justify-center p-2 min-w-[60px] transition-colors text-muted-foreground hover:text-primary" />}>
-              <div className="relative">
-                <Menu size={24} className="mb-1" />
-                {(hasNewBoard || hasNewChores) && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
-              </div>
-              <span className="text-[10px] font-medium mt-1">More</span>
-          </SheetTrigger>
-          <SheetContent side="bottom" className="rounded-t-3xl h-[50vh]">
-            <SheetHeader>
-              <SheetTitle className="text-left">More Options</SheetTitle>
-            </SheetHeader>
-            <div className="grid gap-2 py-6">
-              {mobileMoreNav.map((item) => (
-                <NavLink
+        {/* Fluid Animated More Menu */}
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className={`relative z-[60] flex flex-col items-center justify-center p-2 min-w-[60px] transition-colors ${isMobileMenuOpen ? 'text-primary' : 'text-muted-foreground hover:text-primary'}`}
+        >
+          <motion.div animate={{ rotate: isMobileMenuOpen ? 180 : 0 }} transition={{ type: "spring", stiffness: 300, damping: 20 }}>
+            {isMobileMenuOpen ? <XIcon size={24} className="mb-1" /> : <Menu size={24} className="mb-1" />}
+          </motion.div>
+          {(hasNewBoard || hasNewChores) && !isMobileMenuOpen && <span className="absolute top-1 right-2 w-2 h-2 bg-red-500 rounded-full"></span>}
+          <span className="text-[10px] font-medium mt-1">{isMobileMenuOpen ? 'Close' : 'More'}</span>
+        </button>
+      </nav>
+
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-transparent backdrop-blur-md z-[45] md:hidden"
+            />
+            
+            {/* Floating Menu Items */}
+            <div className="md:hidden fixed bottom-[85px] right-4 z-[45] flex flex-col-reverse items-end gap-3 pointer-events-none">
+              {mobileMoreNav.map((item, idx) => (
+                <motion.div
                   key={item.to}
-                  to={item.to}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-4 px-4 py-4 rounded-2xl transition-colors ${
-                      isActive ? 'bg-primary/10 text-primary font-medium' : 'bg-muted/50 text-foreground hover:bg-muted'
-                    }`
-                  }
+                  initial={{ opacity: 0, y: 20, scale: 0.8, filter: 'blur(10px)' }}
+                  animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+                  exit={{ opacity: 0, y: 20, scale: 0.8, filter: 'blur(10px)' }}
+                  transition={{ 
+                    delay: (mobileMoreNav.length - idx - 1) * 0.05, 
+                    type: 'spring', 
+                    stiffness: 300, 
+                    damping: 25 
+                  }}
+                  className="pointer-events-auto origin-bottom-right"
                 >
-                  <div className="relative">
-                    <item.icon size={24} className={location.pathname === item.to ? 'text-primary' : 'text-muted-foreground'} />
-                    {item.hasDot && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
-                  </div>
-                  <span className="text-base">{item.label}</span>
-                </NavLink>
+                  <NavLink
+                    to={item.to}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-5 py-3.5 rounded-full shadow-xl transition-all active:scale-95 ${
+                        isActive ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground border border-border/50'
+                      }`
+                    }
+                  >
+                    <span className="font-semibold text-sm tracking-tight">{item.label}</span>
+                    <div className="relative">
+                      <item.icon size={20} className={location.pathname === item.to ? '' : 'text-primary'} />
+                      {item.hasDot && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card"></span>}
+                    </div>
+                  </NavLink>
+                </motion.div>
               ))}
             </div>
-          </SheetContent>
-        </Sheet>
-      </nav>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

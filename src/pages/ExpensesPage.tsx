@@ -277,7 +277,8 @@ export default function ExpensesPage() {
             await updateDoc(doc(db, 'pantryItems', matchedItem.id), {
               quantity: newQuantity,
               dateAdded: new Date().toISOString(), // refresh date
-              history: newHistory
+              history: newHistory,
+              emojis: matchedItem.emojis || item.emojis || ''
             });
           } else {
             // Add new item
@@ -288,6 +289,7 @@ export default function ExpensesPage() {
               unit: 'unit',
               category: item.category || 'Groceries',
               healthTag: item.healthTag || '',
+              emojis: item.emojis || '',
               addedBy: user.uid,
               dateAdded: new Date().toISOString(),
               history: [newHistoryEntry]
@@ -684,10 +686,10 @@ export default function ExpensesPage() {
       </div>
 
       <Tabs defaultValue="ledger" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-6 bg-card rounded-full p-1 h-12 shadow-sm">
-          <TabsTrigger value="ledger" className="rounded-full text-sm">Ledger</TabsTrigger>
-          <TabsTrigger value="add" className="rounded-full text-sm">Add Expense</TabsTrigger>
-          <TabsTrigger value="recurring" className="rounded-full text-sm">Recurring</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-3 mb-8 bg-muted/70 rounded-2xl p-1 shadow-inner border border-border/40 min-h-[44px] backdrop-blur-md">
+          <TabsTrigger value="ledger" className="rounded-xl text-xs sm:text-sm font-semibold data-active:shadow-md data-active:bg-background transition-all duration-200">Ledger</TabsTrigger>
+          <TabsTrigger value="add" className="rounded-xl text-xs sm:text-sm font-semibold data-active:shadow-md data-active:bg-background transition-all duration-200">Add Expense</TabsTrigger>
+          <TabsTrigger value="recurring" className="rounded-xl text-xs sm:text-sm font-semibold data-active:shadow-md data-active:bg-background transition-all duration-200">Recurring</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ledger" className="space-y-6">
@@ -807,7 +809,7 @@ export default function ExpensesPage() {
               const payer = flatmates.find(m => m.id === exp.paidBy);
               return (
                 <Card key={exp.id} className={`rounded-2xl shadow-sm border-0 transition-opacity ${exp.settled ? 'opacity-50' : ''}`}>
-                  <CardContent className="p-4 flex items-center justify-between">
+                  <CardContent className="p-6 flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                         <Receipt size={20} />

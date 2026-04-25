@@ -217,9 +217,9 @@ export default function OnboardingPage() {
       <Card className="w-full max-w-md rounded-3xl shadow-xl border-0 overflow-hidden">
         <CardHeader className="pb-2">
           <Tabs value={isCreating ? 'create' : 'join'} onValueChange={(v) => setIsCreating(v === 'create')} className="w-full mb-4">
-            <TabsList className="grid w-full grid-cols-2 bg-muted rounded-full p-1">
-              <TabsTrigger value="create" className="rounded-full text-xs">Create a Flat</TabsTrigger>
-              <TabsTrigger value="join" className="rounded-full text-xs">Join a Flat</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-2 bg-muted/70 rounded-2xl p-1 shadow-inner border border-border/40 min-h-[44px] backdrop-blur-md">
+              <TabsTrigger value="create" className="rounded-xl text-xs font-semibold data-active:shadow-md data-active:bg-background transition-all">Create a Flat</TabsTrigger>
+              <TabsTrigger value="join" className="rounded-xl text-xs font-semibold data-active:shadow-md data-active:bg-background transition-all">Join a Flat</TabsTrigger>
             </TabsList>
           </Tabs>
           <CardTitle className="text-2xl">{isCreating ? 'Set up your Flat' : 'Join your Flatmates'}</CardTitle>

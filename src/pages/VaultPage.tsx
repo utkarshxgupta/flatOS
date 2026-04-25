@@ -95,7 +95,7 @@ export default function VaultPage() {
         <div className="md:col-span-2 space-y-4">
           {items.map(item => (
             <Card key={item.id} className="rounded-2xl shadow-sm border-0 bg-card">
-              <CardContent className="p-4 flex items-center justify-between">
+              <CardContent className="p-6 flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
                     {getIcon(item.type)}

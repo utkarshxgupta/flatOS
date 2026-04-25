@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { ChefHat, Trash2, Leaf, AlertTriangle, Share2, Package, CheckCircle2, Plus, Camera, History, ShoppingCart } from 'lucide-react';
+import { ChefHat, Trash2, Leaf, AlertTriangle, Share2, Package, CheckCircle2, Plus, Camera, History, ShoppingCart, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { GoogleGenAI } from '@google/genai';
 import { formatDistanceToNow } from 'date-fns';
@@ -28,12 +28,13 @@ export default function PantryPage() {
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
 
   const [isManualAddOpen, setIsManualAddOpen] = useState(false);
-  const [manualItem, setManualItem] = useState({ name: '', quantity: '1', unit: 'unit', category: 'Groceries', healthTag: '' });
+  const [manualItem, setManualItem] = useState({ name: '', quantity: '1', unit: 'unit', category: 'Groceries', healthTag: '', emojis: '' });
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   
   const [isAddingToCart, setIsAddingToCart] = useState(false);
   const [newItemForCart, setNewItemForCart] = useState('');
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -64,7 +65,8 @@ export default function PantryPage() {
         await updateDoc(doc(db, 'pantryItems', matchedItem.id), {
           quantity: newQuantity,
           dateAdded: new Date().toISOString(),
-          history: newHistory
+          history: newHistory,
+          emojis: matchedItem.emojis || manualItem.emojis || ''
         });
       } else {
         await addDoc(collection(db, 'pantryItems'), {
@@ -74,6 +76,7 @@ export default function PantryPage() {
           unit: manualItem.unit,
           category: manualItem.category,
           healthTag: manualItem.healthTag,
+          emojis: manualItem.emojis || '',
           addedBy: user.uid,
           dateAdded: new Date().toISOString(),
           history: [newHistoryEntry]
@@ -81,7 +84,7 @@ export default function PantryPage() {
       }
       toast.success('Item added to pantry');
       setIsManualAddOpen(false);
-      setManualItem({ name: '', quantity: '1', unit: 'unit', category: 'Groceries', healthTag: '' });
+      setManualItem({ name: '', quantity: '1', unit: 'unit', category: 'Groceries', healthTag: '', emojis: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'pantryItems');
       toast.error('Failed to add item');
@@ -151,6 +154,7 @@ export default function PantryPage() {
 - unit: string (the unit, e.g., "unit", "g", "ml", "kg")
 - category: string (e.g., "Groceries", "Produce", "Dairy", "Snacks")
 - healthTag: string (e.g., "Fresh Produce", "High Sugar", "Processed", "Healthy Fats", "Protein", or empty string if none apply)
+- emojis: string (Suggest up to 3 emojis to visually describe this item)
 Only return the JSON object, no markdown formatting.`
                 }
               ]
@@ -169,7 +173,8 @@ Only return the JSON object, no markdown formatting.`
               quantity: parsed.quantity || '1',
               unit: parsed.unit || 'unit',
               category: parsed.category || 'Groceries',
-              healthTag: parsed.healthTag || ''
+              healthTag: parsed.healthTag || '',
+              emojis: parsed.emojis || ''
             });
             toast.success('Item scanned successfully!');
           } catch (e) {
@@ -323,28 +328,30 @@ Only return the JSON object, no markdown formatting.`
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Digital Pantry</h1>
-        <p className="text-muted-foreground mt-1">Auto-stocked from your receipts.</p>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Digital Pantry</h1>
+          <p className="text-muted-foreground mt-1.5 text-sm sm:text-base">Auto-stocked from your receipts.</p>
+        </div>
       </div>
 
-      {/* Mobile Navigation Pills */}
-      <div className="lg:hidden flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 no-scrollbar">
+      {/* Mobile Navigation Segment Control */}
+      <div className="lg:hidden flex p-1 bg-muted/70 rounded-2xl shadow-inner">
         <button 
           onClick={() => setMobileView('pantry')} 
-          className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${mobileView === 'pantry' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+          className={`flex-1 py-2.5 rounded-xl whitespace-nowrap text-xs sm:text-sm font-semibold transition-all duration-200 ease-in-out ${mobileView === 'pantry' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
         >
-          Inventory & History
+          Inventory
         </button>
         <button 
           onClick={() => setMobileView('tobuy')} 
-          className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors flex items-center gap-2 ${mobileView === 'tobuy' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+          className={`flex-1 py-2.5 rounded-xl whitespace-nowrap text-xs sm:text-sm font-semibold transition-all duration-200 ease-in-out flex items-center justify-center gap-1.5 ${mobileView === 'tobuy' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
         >
-          To Buy {shoppingList.length > 0 && <span className="flex items-center justify-center bg-background text-foreground text-[10px] w-4 h-4 rounded-full font-bold">{shoppingList.length}</span>}
+          To Buy {shoppingList.length > 0 && <span className="bg-primary/10 text-primary text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">{shoppingList.length}</span>}
         </button>
         <button 
           onClick={() => setMobileView('meals')} 
-          className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${mobileView === 'meals' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+          className={`flex-1 py-2.5 rounded-xl whitespace-nowrap text-xs sm:text-sm font-semibold transition-all duration-200 ease-in-out ${mobileView === 'meals' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
         >
           Meals & Health
         </button>
@@ -359,50 +366,117 @@ Only return the JSON object, no markdown formatting.`
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-lg font-medium">Current Stock</CardTitle>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="h-8 text-xs rounded-full" onClick={() => setIsManualAddOpen(true)}>
-                  <Plus size={14} className="mr-1" /> Add Item
-                </Button>
                 <Badge variant="outline" className="font-mono">{pantryItems.length} items</Badge>
+                <Button variant="outline" size="sm" className="h-8 text-xs rounded-full bg-primary/5 border-primary/20 hover:bg-primary/10 text-primary" onClick={() => setIsManualAddOpen(true)}>
+                  <Plus size={14} className="mr-1" /> Add
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
               <ScrollArea className="h-[400px] pr-4">
-                <div className="space-y-3">
-                  {pantryItems.map(item => (
-                    <div key={item.id} className="flex items-center justify-between p-3 rounded-2xl bg-muted/50 border border-border">
-                      <div>
-                        <p className="font-medium text-sm">{item.name}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-muted-foreground">Qty: {item.quantity}</span>
-                          {item.healthTag && (
-                            <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${
-                              item.healthTag.toLowerCase().includes('fresh') ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 
-                              item.healthTag.toLowerCase().includes('sugar') ? 'bg-red-500/10 text-red-600 dark:text-red-400' : ''
-                            }`}>
-                              {item.healthTag}
-                            </Badge>
-                          )}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pb-2">
+                  {pantryItems.map(item => {
+                    let originalQtyStr = null;
+                    if (item.history && item.history.length > 0) {
+                      let totalVal = 0;
+                      let commonUnit = '';
+                      item.history.forEach((h: any) => {
+                        const match = h.quantity.toString().toLowerCase().match(/([\d.]+)\s*([a-zA-Z]+)?/);
+                        if (match) {
+                          totalVal += parseFloat(match[1]);
+                          commonUnit = match[2] || '';
+                        }
+                      });
+                      
+                      const currentMatch = item.quantity.toString().toLowerCase().match(/([\d.]+)\s*([a-zA-Z]+)?/);
+                      if (currentMatch) {
+                        const currentVal = parseFloat(currentMatch[1]);
+                        if (Math.abs(totalVal - currentVal) > 0.01) {
+                          originalQtyStr = `${totalVal} ${commonUnit}`.trim();
+                        }
+                      }
+                    }
+
+                    const isExpanded = expandedItemId === item.id;
+                    const displayEmoji = item.emojis ? item.emojis.substring(0, 5) : '📦';
+
+                    return (
+                      <div 
+                        key={item.id} 
+                        className={`group flex flex-col p-3 rounded-[1.25rem] border border-border/50 cursor-pointer transition-all duration-200 ${isExpanded ? 'col-span-2 sm:col-span-3 md:col-span-4 bg-muted/30 shadow-md ring-1 ring-border' : 'bg-card shadow-sm hover:shadow-md hover:border-primary/20'}`}
+                        onClick={() => setExpandedItemId(isExpanded ? null : item.id)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className={`flex items-center justify-center rounded-xl bg-muted/50 ${isExpanded ? 'w-12 h-12 text-3xl mb-1' : 'w-10 h-10 text-2xl'}`}>
+                            {displayEmoji}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <span className="text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              {item.quantity}
+                            </span>
+                            {originalQtyStr && !isExpanded && (
+                              <span className="text-[9px] line-through text-muted-foreground opacity-70 px-1">
+                                {originalQtyStr}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        {item.history && item.history.length > 1 && (
-                          <div className="text-[10px] text-muted-foreground mt-1.5 space-y-0.5 border-l-2 border-muted pl-2">
-                            {item.history.map((h: any, i: number) => (
-                              <div key={i}>• {h.quantity} added on {new Date(h.date).toLocaleDateString()}</div>
-                            ))}
+
+                        <p className={`font-semibold mt-2 text-foreground/90 ${isExpanded ? 'text-lg break-words leading-tight' : 'text-sm truncate'}`}>
+                          {item.name}
+                        </p>
+
+                        {isExpanded && (
+                          <div className="mt-4 pt-3 border-t border-border/60 flex flex-col gap-4 animate-in slide-in-from-top-2 fade-in duration-200" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between">
+                              {item.healthTag ? (
+                                <Badge variant="secondary" className={`text-xs px-2.5 py-1 rounded-full border-0 ${
+                                  item.healthTag.toLowerCase().includes('fresh') ? 'bg-green-500/10 text-green-700 dark:text-green-400' : 
+                                  item.healthTag.toLowerCase().includes('sugar') ? 'bg-red-500/10 text-red-700 dark:text-red-400' : ''
+                                }`}>
+                                  {item.healthTag}
+                                </Badge>
+                              ) : <span className="text-xs text-muted-foreground">No health tags</span>}
+                              
+                              {originalQtyStr && (
+                                <span className="text-xs text-muted-foreground">
+                                  Originally <span className="font-medium line-through opacity-70">{originalQtyStr}</span>
+                                </span>
+                              )}
+                            </div>
+                            
+                            {item.history && item.history.length > 0 && (
+                              <div className="text-xs text-muted-foreground bg-background/50 p-3 rounded-xl border border-border/50">
+                                <p className="font-semibold text-foreground/80 mb-2">Restock History</p>
+                                <div className="space-y-1.5 flex flex-col max-h-[100px] overflow-y-auto no-scrollbar">
+                                  {item.history.map((h: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40"></span>
+                                        {h.quantity}
+                                      </div>
+                                      <span className="text-muted-foreground/60">{new Date(h.date).toLocaleDateString()}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-3 mt-1">
+                              <Button variant="secondary" className="h-10 flex-1 text-green-700 hover:text-green-800 bg-green-500/10 hover:bg-green-500/20 dark:text-green-400 border-0 shadow-none font-semibold rounded-xl" onClick={(e) => { e.stopPropagation(); consumeItem(item); }}>
+                                <CheckCircle2 size={18} className="mr-2" /> Consume
+                              </Button>
+                              <Button variant="outline" size="icon" className="h-10 w-10 text-muted-foreground hover:bg-red-500/10 hover:text-red-600 border-border/50 hover:border-red-200 shrink-0 rounded-xl" onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}>
+                                <Trash2 size={18} />
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20" onClick={() => consumeItem(item)}>
-                          <CheckCircle2 size={14} className="mr-1" /> Consume
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500" onClick={() => deleteItem(item.id)}>
-                          <Trash2 size={16} />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {pantryItems.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground">
+                    <div className="col-span-full text-center py-12 text-muted-foreground">
                       <Package size={48} className="mx-auto mb-4 opacity-20" />
                       <p>Pantry is empty.</p>
                       <p className="text-sm mt-1">Upload a receipt in Expenses to auto-stock.</p>
@@ -426,22 +500,24 @@ Only return the JSON object, no markdown formatting.`
                   {consumptionLogs.map((log) => {
                     const mate = flatmates.find(m => m.id === log.userId);
                     return (
-                      <div key={log.id} className="flex items-start gap-4 p-3 rounded-2xl bg-card border border-border">
-                        <Avatar className="h-10 w-10 mt-1 shadow-sm">
+                      <div key={log.id} className="flex items-start gap-4 p-4 rounded-2xl bg-muted/20 border border-border/40 hover:bg-muted/40 transition-colors">
+                        <Avatar className="h-10 w-10 mt-0.5 shadow-sm border border-border/50">
                           <AvatarImage src={mate?.photoURL} />
-                          <AvatarFallback>{mate?.displayName?.charAt(0)}</AvatarFallback>
+                          <AvatarFallback className="bg-primary/5 text-primary">
+                            {mate?.displayName?.charAt(0) || <History size={16} />}
+                          </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 space-y-1">
-                          <p className="leading-tight text-sm">
-                            <span className="font-medium text-foreground">{mate?.displayName}</span> consumed <span className="font-medium">{log.itemName}</span>
-                            {log.quantity && <span className="text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded ml-1.5 text-xs">{log.quantity}</span>}
+                          <p className="leading-snug text-sm">
+                            <span className="font-semibold text-foreground">{mate?.displayName || 'Someone'}</span> consumed <span className="font-medium">{log.itemName}</span>
+                            {log.quantity && <span className="font-mono text-muted-foreground bg-background border border-border/50 shadow-sm px-1.5 py-0.5 rounded-md ml-1.5 text-[11px] font-medium">{log.quantity}</span>}
                           </p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-2">
+                          <p className="text-[11px] font-medium text-muted-foreground/70 flex items-center gap-2">
                             {formatDistanceToNow(new Date(log.date), { addSuffix: true })}
                             {log.healthTag && (
                               <span className="inline-flex items-center">
-                                <span className="w-1 h-1 rounded-full bg-border mx-1"></span>
-                                <span className="opacity-80">{log.healthTag}</span>
+                                <span className="w-1 h-1 rounded-full bg-border mx-1.5"></span>
+                                <span className="uppercase tracking-wider">{log.healthTag}</span>
                               </span>
                             )}
                           </p>
@@ -471,7 +547,7 @@ Only return the JSON object, no markdown formatting.`
                     className="rounded-3xl shadow-sm border-0 bg-card cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
                     onClick={() => setSelectedRecipe(recipe)}
                   >
-                    <CardContent className="p-5 flex flex-col h-full">
+                    <CardContent className="p-6 flex flex-col h-full gap-3">
                       <h4 className="font-semibold mb-2">{recipe.name}</h4>
                       <p className="text-xs text-muted-foreground mb-4 flex-1">
                         Uses: {recipe.ingredientsToUse.join(', ')}
@@ -513,12 +589,16 @@ Only return the JSON object, no markdown formatting.`
               <ScrollArea className="h-[250px] pr-2">
                 <div className="space-y-2">
                   {shoppingList.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between p-3 rounded-2xl bg-muted/50 border border-transparent group transition-colors hover:border-border">
+                    <div 
+                      key={item.id} 
+                      className="group flex items-center justify-between p-3.5 rounded-2xl bg-muted/30 border border-border/50 hover:bg-muted/60 transition-all hover:border-border/80 cursor-pointer"
+                      onClick={() => handleDeleteShoppingItem(item.id)}
+                    >
                       <div className="flex items-center gap-3">
-                        <div className="h-4 w-4 rounded-full border-2 border-muted-foreground flex items-center justify-center cursor-pointer hover:border-primary transition-colors" onClick={() => handleDeleteShoppingItem(item.id)}></div>
+                        <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/50 group-hover:border-primary group-hover:bg-primary/10 flex items-center justify-center transition-all"></div>
                         <span className="text-sm font-medium">{item.name}</span>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteShoppingItem(item.id)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition-opacity" onClick={(e) => { e.stopPropagation(); handleDeleteShoppingItem(item.id); }}>
                         <Trash2 size={16} />
                       </Button>
                     </div>
@@ -537,7 +617,7 @@ Only return the JSON object, no markdown formatting.`
 
           {/* Health Score */}
           <Card className={`rounded-3xl shadow-sm border-0 bg-card ${mobileView === 'meals' ? 'block' : 'hidden'} lg:block`}>
-            <CardContent className="p-6">
+            <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-medium">Household Health</h3>
                 {healthScore >= 70 ? <Leaf className="text-green-500" size={20} /> : <AlertTriangle className="text-orange-500" size={20} />}
@@ -558,7 +638,7 @@ Only return the JSON object, no markdown formatting.`
             <div className="absolute top-0 right-0 p-4 opacity-10">
               <ChefHat size={80} />
             </div>
-            <CardContent className="p-6 relative z-10">
+            <CardContent className="pt-6 relative z-10">
               <h3 className="font-semibold text-lg mb-2">Reverse Recipe Engine</h3>
               <p className="text-sm text-primary-foreground/80 mb-6">
                 Don't know what to cook? Let AI suggest meals based on what's already in your pantry.
@@ -668,6 +748,16 @@ Only return the JSON object, no markdown formatting.`
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
+                <Label htmlFor="itemEmojis">Emoji Icon</Label>
+                <Input id="itemEmojis" value={manualItem.emojis} onChange={e => setManualItem({...manualItem, emojis: e.target.value})} placeholder="e.g. 🥛" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="itemCategory">Category</Label>
+                <Input id="itemCategory" value={manualItem.category} onChange={e => setManualItem({...manualItem, category: e.target.value})} placeholder="e.g. Dairy" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
                 <Label htmlFor="itemQty">Quantity</Label>
                 <Input id="itemQty" type="number" value={manualItem.quantity} onChange={e => setManualItem({...manualItem, quantity: e.target.value})} />
               </div>
@@ -675,10 +765,6 @@ Only return the JSON object, no markdown formatting.`
                 <Label htmlFor="itemUnit">Unit</Label>
                 <Input id="itemUnit" value={manualItem.unit} onChange={e => setManualItem({...manualItem, unit: e.target.value})} placeholder="e.g. L, kg, unit" />
               </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="itemCategory">Category</Label>
-              <Input id="itemCategory" value={manualItem.category} onChange={e => setManualItem({...manualItem, category: e.target.value})} placeholder="e.g. Dairy" />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="itemHealth">Health Tag (Optional)</Label>
