@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, OAuthProvider, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 import firebaseConfig from '../firebase-applet-config.json';
@@ -8,6 +8,7 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+export const appleProvider = new OAuthProvider('apple.com');
 
 export const signInWithGoogle = async () => {
   try {
@@ -15,6 +16,32 @@ export const signInWithGoogle = async () => {
     return result.user;
   } catch (error) {
     console.error("Error signing in with Google", error);
+    throw error;
+  }
+};
+
+export const signInWithApple = async () => {
+  try {
+    const result = await signInWithPopup(auth, appleProvider);
+    return result.user;
+  } catch (error) {
+    console.error("Error signing in with Apple", error);
+    throw error;
+  }
+};
+
+export const setupRecaptcha = (containerId: string) => {
+  return new RecaptchaVerifier(auth, containerId, {
+    size: 'invisible',
+  });
+};
+
+export const requestPhoneOtp = async (phoneNumber: string, appVerifier: RecaptchaVerifier): Promise<ConfirmationResult> => {
+  try {
+    const result = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+    return result;
+  } catch (error) {
+    console.error("Error with phone sign-in", error);
     throw error;
   }
 };

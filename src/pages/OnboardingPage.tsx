@@ -1,29 +1,40 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../AppContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, addDoc, doc, updateDoc, arrayUnion, getDoc, query, where, getDocs, writeBatch, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, arrayUnion, getDoc, query, where, getDocs, writeBatch, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { parseSplitwiseScreenshot } from '../lib/gemini';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
+import { Upload } from 'lucide-react';
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 export default function OnboardingPage() {
-  const { user, refreshProfile } = useAppContext();
+  const { user, userProfile, refreshProfile } = useAppContext();
   const [isCreating, setIsCreating] = useState(true);
   const [flatName, setFlatName] = useState('');
   const [currency, setCurrency] = useState('INR');
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [userName, setUserName] = useState('');
+
   
   const [dummyUsers, setDummyUsers] = useState<any[]>([]);
   const [showClaimScreen, setShowClaimScreen] = useState(false);
   const [flatToJoin, setFlatToJoin] = useState<any>(null);
 
   const [pendingRequest, setPendingRequest] = useState<any>(null);
+  
+  const [createdFlatId, setCreatedFlatId] = useState<string | null>(null);
+  
+  // Splitwise Import State
+  const [splitwiseResult, setSplitwiseResult] = useState<{ personas: string[], debts: any[] } | null>(null);
+  const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
+  const splitwiseInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -38,7 +49,9 @@ export default function OnboardingPage() {
 
     const unsubUser = onSnapshot(doc(db, 'users', user.uid), (snap) => {
       if (snap.exists() && snap.data().flatId) {
-        refreshProfile(); 
+        if (!window.localStorage.getItem('isCreatingFlat')) {
+          refreshProfile(); 
+        }
       }
     });
 
@@ -48,9 +61,26 @@ export default function OnboardingPage() {
     };
   }, [user]);
 
+  const handleSaveName = async () => {
+    if (!user || !userName.trim()) return;
+    setLoading(true);
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { displayName: userName.trim() });
+      await refreshProfile();
+      toast.success("Name updated!");
+    } catch(err) {
+       console.error("Error updating name", err);
+       toast.error("Failed to update name");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const handleCreateFlat = async () => {
     if (!flatName || !user) return;
     setLoading(true);
+    window.localStorage.setItem('isCreatingFlat', 'true');
     try {
       const flatData = {
         name: flatName,
@@ -65,14 +95,111 @@ export default function OnboardingPage() {
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, { flatId: flatRef.id });
       
-      await refreshProfile();
+      setCreatedFlatId(flatRef.id);
       toast.success('Flat created successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'flats');
       toast.error('Failed to create flat');
+      window.localStorage.removeItem('isCreatingFlat');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSplitwiseUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    toast.info('Analyzing Splitwise screenshot...');
+    
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = (reader.result as string).split(',')[1];
+        const result = await parseSplitwiseScreenshot(base64String, file.type);
+        
+        setSplitwiseResult(result);
+        setSelectedPersonas(result.personas);
+        toast.success('Screenshot parsed successfully!');
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to parse screenshot');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitSplitwiseImport = async () => {
+    if (!user || !createdFlatId || !splitwiseResult) return;
+    setLoading(true);
+    try {
+      const personaToIdMap: Record<string, string> = {};
+      
+      // Since it's a new flat, the user is the only member. We'll map the current user if possible, and rest to dummy users.
+      for (const personaName of selectedPersonas) {
+        const isSelf = user.displayName?.toLowerCase().includes(personaName.toLowerCase()) || personaName.toLowerCase().includes(user.displayName?.toLowerCase() || 'unknown_placeholder_never_match');
+        
+        if (isSelf) {
+          personaToIdMap[personaName] = user.uid;
+        } else {
+          const dummyId = `dummy_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          await setDoc(doc(db, 'users', dummyId), {
+            uid: dummyId,
+            displayName: personaName,
+            email: `${dummyId}@dummy.flatos`,
+            photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${personaName}`,
+            karma: 0,
+            flatId: createdFlatId,
+            isDummy: true
+          });
+          personaToIdMap[personaName] = dummyId;
+        }
+      }
+
+      const getPersonaId = (name: string) => {
+        const key = Object.keys(personaToIdMap).find(k => k.toLowerCase() === name.toLowerCase() || k.includes(name) || name.includes(k));
+        return key ? personaToIdMap[key] : null;
+      };
+
+      for (const debt of splitwiseResult.debts) {
+        // Only process if both payer and borrower were selected for import
+        const payerKey = selectedPersonas.find(p => p.toLowerCase() === debt.payer.toLowerCase() || p.includes(debt.payer) || debt.payer.includes(p));
+        const borrowerKey = selectedPersonas.find(p => p.toLowerCase() === debt.borrower.toLowerCase() || p.includes(debt.borrower) || debt.borrower.includes(p));
+
+        if (payerKey && borrowerKey) {
+          const payerId = getPersonaId(debt.payer);
+          const borrowerId = getPersonaId(debt.borrower);
+          
+          if (payerId && borrowerId) {
+            await addDoc(collection(db, 'expenses'), {
+              flatId: createdFlatId,
+              title: `Imported Balance (${debt.borrower} owes ${debt.payer})`,
+              amount: Number(debt.amount) || 0,
+              paidBy: payerId,
+              splitBetween: [borrowerId],
+              date: new Date().toISOString(),
+              settled: false
+            });
+          }
+        }
+      }
+
+      toast.success('Splitwise balances imported!');
+      finishOnboarding();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'expenses');
+      toast.error('Failed to import balances');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const finishOnboarding = async () => {
+    window.localStorage.removeItem('isCreatingFlat');
+    await refreshProfile();
   };
 
   const handleJoinFlat = async () => {
@@ -206,6 +333,117 @@ export default function OnboardingPage() {
                 {loading ? 'Joining...' : "None of these, I'm new"}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (createdFlatId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md rounded-3xl shadow-xl border-0 overflow-hidden">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Import from Splitwise</CardTitle>
+            <CardDescription>
+              Bring in your existing balances from Splitwise instantly! Upload a screenshot to migrate debts.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              ref={splitwiseInputRef}
+              onChange={handleSplitwiseUpload}
+            />
+            <Button 
+              variant="outline" 
+              className="w-full h-24 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-muted/50" 
+              onClick={() => splitwiseInputRef.current?.click()} 
+              disabled={loading}
+            >
+              <Upload size={24} className="text-muted-foreground" />
+              <span className="text-muted-foreground">Upload Screenshot</span>
+            </Button>
+
+            {splitwiseResult && (
+              <div className="bg-muted p-4 rounded-2xl text-sm">
+                <h4 className="font-semibold mb-2">Select Profiles to Import:</h4>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {splitwiseResult.personas.map((persona, idx) => {
+                    const isSelected = selectedPersonas.includes(persona);
+                    return (
+                      <div 
+                        key={idx} 
+                        onClick={() => {
+                          if (isSelected) setSelectedPersonas(prev => prev.filter(p => p !== persona));
+                          else setSelectedPersonas(prev => [...prev, persona]);
+                        }}
+                        className={`px-3 py-1.5 rounded-full border cursor-pointer transition-colors ${
+                          isSelected ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted font-medium cursor-pointer'
+                        }`}
+                      >
+                        {persona}
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button className="w-full rounded-full" onClick={submitSplitwiseImport} disabled={loading || selectedPersonas.length === 0}>
+                  {loading ? 'Importing...' : `Import Data for ${selectedPersonas.length} People`}
+                </Button>
+              </div>
+            )}
+
+            <Button 
+              variant="ghost" 
+              className="w-full rounded-full mt-4" 
+              onClick={finishOnboarding}
+              disabled={loading}
+            >
+              Skip and go to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!userProfile?.displayName || userProfile?.displayName === 'Anonymous' || userProfile?.displayName === '') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md rounded-3xl shadow-xl border-0 overflow-hidden">
+          <CardHeader className="text-center pt-8">
+            <div className="mx-auto bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mb-4">
+              <span className="text-2xl">👋</span>
+            </div>
+            <CardTitle className="text-3xl font-bold tracking-tight">Welcome to FlatOS</CardTitle>
+            <CardDescription className="text-base mt-2">
+              Before we get started, what should your flatmates call you?
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6 pb-8">
+            <div className="space-y-2">
+              <Label htmlFor="userName" className="text-sm font-medium text-muted-foreground ml-1">Your Name</Label>
+              <Input 
+                id="userName" 
+                placeholder="E.g. John Doe" 
+                value={userName} 
+                onChange={(e) => setUserName(e.target.value)} 
+                className="rounded-2xl h-14 px-4 shadow-sm text-lg"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveName();
+                }}
+              />
+            </div>
+            <Button 
+               size="lg" 
+               className="w-full rounded-2xl h-14 text-lg font-semibold shadow-md active:scale-[0.98] transition-transform" 
+               onClick={handleSaveName} 
+               disabled={loading || !userName.trim()}
+            >
+              {loading ? 'Saving...' : 'Continue'}
+            </Button>
           </CardContent>
         </Card>
       </div>
